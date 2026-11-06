@@ -1,12 +1,18 @@
 # IoT safety and responsibility statement
 
 <!-- IOT_DISCLAIMER_VERSION: 2026-11-03 -->
-**Version 2026-11-03** · OpenAmika, MekaHime Inc. · [English](#english) · [日本語](#日本語) · [简体中文](#简体中文)
+**Version 2026-11-03** · OpenAmika, MekaHime Inc. · [English](#english) · [日本語](#日本語) · [简体中文](#简体中文) · [한국어](#한국어)
 
 OpenAmika shows this statement on the Tools page before any IoT (smart-home) feature can be turned on, and turns IoT
 on only after you tick "I have read and accept this" and press **Enable IoT**. It asks again whenever this statement
 changes: the version above changes with it, and IoT stays off until the new version is accepted. The launcher, the
 brain and the openamika-iot bridge all refuse to start IoT without that acceptance.
+
+Translation policy (2026-11-06): Korean is a translation of the unchanged English statement, not new terms or
+permission. The consent version remains 2026-11-03. Reading or switching a language never records acceptance,
+enables a server, or grants a capability. Existing current-version acceptance remains valid; missing or stale
+acceptance still requires the person's explicit checkbox and Enable IoT action. A substantive safety or obligation
+change must increment the version and ask again. The English original governs if translations differ.
 
 <!-- iot-disclaimer:en -->
 ## English
@@ -122,6 +128,82 @@ MekaHime. If you do not agree, do not enable IoT, and if it is already on, turn 
 
 Questions: hi@mekahime.com
 <!-- /iot-disclaimer:en -->
+
+<!-- iot-disclaimer:ko -->
+## 한국어
+
+**IoT 안전 및 책임 고지, 버전 2026-11-03**
+
+**IoT를 켜기 전에 이 고지 전체를 읽으세요. 동의하지 않으면 IoT를 활성화하지 마세요.**
+
+### 1. 이 고지의 적용 범위
+
+"IoT"는 OpenAmika를 통해 Amika가 실제 세계의 무언가를 확인하거나 켜고 끄거나 변경할 수 있는 모든 경로를 뜻합니다. 도구 페이지의 스마트 홈 및 IoT 패널, openamika-iot 브리지(servers/openamika-iot), 실행기가 시작할 수 있는 MQTT 브로커와 zigbee2mqtt 서비스, Home Assistant의 MCP 서버, 기기에 접근할 수 있도록 연결한 다른 모든 MCP 서버·에이전트·도구가 포함됩니다. "기기"는 이들이 접근할 수 있는 스마트 플러그, 스위치, 조명, 센서, 장면과 여기에 꽂히거나 배선으로 연결되거나 제어되는 모든 것을 뜻합니다.
+
+### 2. Amika는 AI이며 안전 시스템이 아닙니다
+
+Amika는 대규모 언어 모델(LLM)로 작동합니다. LLM은 비결정적입니다. 같은 말이라도 매번 다른 답변이나 행동으로 이어질 수 있으며, MekaHime을 포함해 누구도 Amika의 행동을 예측하거나 보장할 수 없습니다. 특히 다음과 같은 일이 일어날 수 있습니다.
+
+- 말을 잘못 듣거나(음성 인식은 잡음, 억양, 이름, 비슷하게 들리는 단어에서 실수합니다) 의도를 잘못 이해할 수 있습니다.
+- 이름·별명·메모가 비슷한 기기나 이름 변경·재페어링·이동한 기기 등 잘못된 기기를 조작할 수 있습니다.
+- 너무 이르거나 늦거나 요청한 지 한참 후 등 잘못된 시점에 작동할 수 있습니다.
+- 동작을 반복하거나 건너뛰거나 일부만 수행할 수 있습니다.
+- 실제로 수행하지 않았는데 완료했다고 하거나 실패하지 않았는데 실패했다고 할 수 있습니다.
+- 조종당할 수 있습니다. 대화, 메시지, 웹 페이지, 이메일, 문서, 영상, 노래의 말이나 카메라를 통해 보거나 듣거나 읽는 모든 내용이 행동을 유도할 수 있습니다(이를 프롬프트 인젝션이라고 합니다). 같은 방, 통화 또는 채팅에 있는 다른 사람도 Amika에게 말할 수 있습니다.
+- 기기의 정체, 연결된 물건, 전환 동작의 결과를 잘못 판단할 수 있습니다.
+
+Amika가 의존하는 모든 요소도 고장 나거나 예상과 다르게 작동할 수 있습니다. AI 모델과 이를 제공하는 회사, 인터넷 연결과 가정 네트워크, OpenAmika 자체와 브리지, MQTT 브로커, zigbee2mqtt, Zigbee 동글과 무선 통신, Home Assistant나 다른 연동, 기기와 펌웨어가 모두 해당합니다. 기기가 전원이나 연결을 잃거나 다른 상태로 재시작하거나 명령을 놓치거나 잘못된 상태를 보고할 수 있습니다.
+
+### 3. 안전을 보장하지 않습니다
+
+Amika가 IoT 기기, 연결된 물건, 집이나 다른 재산, 데이터, 사람이나 동물에 해를 끼치지 않는다고 보장하지 않습니다. OpenAmika의 보호 장치(요청한 경우에만 행동, 실행 전 사용자의 말 확인, 도구별 정책, 승인 단계, 기기 확인, 상태 점검)는 일부 위험을 줄이려는 최선의 노력일 뿐입니다. 결코 보장이 아니며 실패할 수 있습니다. 누구의 안전도 여기에 의존해서는 안 됩니다.
+
+### 4. 위험은 본인이 부담합니다
+
+Amika의 IoT에 연결하는 모든 것은 본인의 위험 부담으로 연결합니다. 다음 사항은 전적으로 본인의 책임입니다.
+
+- 무엇을 연결하고 그 기기에 무엇이 꽂히거나 제어되는지 확인하는 일.
+- 네트워크, MQTT 브로커, 계정과 접근 토큰을 포함하여 설치·배선·설정·페어링·이름 지정·보안을 관리하는 일.
+- IoT가 켜져 있는 동안 Amika를 감독하고 수행한 일을 확인하며 잘못되면 바로잡는 일.
+- 기기 제조사와 이용하는 모든 서비스의 지침·경고·약관을 따르는 일.
+- 거주 지역의 법률·규정·건축 기준·전기 안전 규칙을 준수하고 집 안의 사람이나 기기의 영향을 받는 모든 사람의 안전과 권리를 존중하는 일.
+
+### 5. 위험한 것은 연결하지 마세요
+
+위험한 물건 또는 잘못된 시점에 켜고 끄거나 켜 둔 채 방치하거나 오용·악용하면 위험해질 수 있는 물건을 직간접적으로 연결하지 마세요. 예를 들어 다음은 절대 연결하지 마세요.
+
+- 난방기와 보조 난방기, 전기 담요, 열 램프, 온열 패드.
+- 스토브, 조리대, 오븐, 토스터, 주전자, 다리미, 헤어 고데기, 납땜 인두, 3D 프린터와 그 밖의 모든 가열·조리 기기.
+- 가스 밸브, 수도 밸브, 펌프, 관개 장치, 보일러, 온수기.
+- 문 잠금장치와 스마트 잠금장치, 차고 문, 대문, 전동 창문·셔터·블라인드와 집에 들어올 수 있는 사람을 통제하는 모든 물건.
+- 경보기와 보안 시스템, 카메라, 연기·일산화탄소 감지기와 사람을 보호하는 모든 물건.
+- 모든 종류의 의료·생명 유지·이동 보조·건강 관리 장비.
+- 아동·반려동물 안전 기기: 아기 모니터, 자동 급식기, 수족관·테라리움·사육장의 히터·펌프·조명, 반려동물 출입문, 울타리.
+- 차량과 충전기, 전기 자전거·킥보드 충전기, 기계, 전동 공구, 산업 장비.
+- 고전력 부하 또는 사용하는 플러그·케이블·연장선·어댑터의 정격 한계에 가까운 부하.
+- 고장, 예기치 않은 전환, 켜지거나 꺼진 채 방치됨으로 인해 화재·침수·감전·부상·질병·손상·데이터 손실이 발생하거나 누군가 침입할 수 있게 되는 모든 물건.
+
+연결해도 안전한지 확신할 수 없다면 연결하지 마세요.
+
+### 6. 직접 제어할 수 있어야 합니다
+
+- 연결된 모든 기기에 대한 수동·물리적 제어 수단을 유지하세요. Amika 없이도 언제나 손으로 켜고 끄거나 플러그를 뽑을 수 있어야 합니다.
+- 안전·건강·보안·재산에 중요한 일은 Amika에 의존하지 마세요.
+- 해를 끼칠 수 있는 물건이 연결된 상태에서 IoT를 감독 없이 작동시키지 마세요.
+- 설정 변경의 의미를 이해하지 못한다면, 전환 전에 승인을 기다리게 하는 설정(도구 페이지의 "confirm")을 유지하세요.
+- 어린이나 이 고지를 읽고 동의하지 않은 사람이 Amika의 IoT를 설정하거나 사용하게 하지 마세요.
+- IoT는 언제든지 끌 수 있습니다. 도구 페이지에서 스마트 홈 서버나 "도구 활성화"를 끄거나 OpenAmika를 종료하세요. IoT를 끄면 Amika가 기기에 접근하지 못하지만 기기의 현재 상태는 바뀌지 않으므로 직접 확인하세요.
+
+### 7. 보증 및 책임의 부인
+
+OpenAmika는 MIT 라이선스에 명시된 대로 상품성, 특정 목적에의 적합성, 비침해성을 포함하되 이에 한정되지 않는 어떠한 명시적·묵시적 보증도 없이 "있는 그대로" 제공됩니다. 관련 법률이 허용하는 최대 범위에서 MekaHime Inc.와 OpenAmika 기여자는 Amika의 IoT 기능 사용 결과나 이와 관련해 발생한 손해·손실·부상에 책임을 지지 않습니다. 기기·재산 손상, 화재, 침수, 데이터 손실, 금전적 손실, 신체 상해, 사망을 포함하며, 계약·불법행위(과실 포함) 또는 그 밖의 사유인지, 발생 가능성을 미리 통지받았는지와 관계없습니다. 법률이 책임의 배제나 제한을 허용하지 않는 경우에는 법률이 허용하는 범위에서만 배제하거나 제한합니다. 이 고지는 IoT 기능에 관하여 MIT 라이선스를 보완하며 그 내용을 축소하지 않습니다.
+
+### 8. 사용자의 동의
+
+"이 고지를 읽었으며 동의합니다"를 선택하고 IoT를 활성화하면 이 고지를 읽고 이해하고 동의했으며 해당 기기와 집에 관해 결정할 권한이 있음을 확인하는 것입니다. OpenAmika는 동의한 버전과 시각을 본인의 컴퓨터에 있는 config/tools.json에 기록하며 MekaHime에 전송하지 않습니다. 동의하지 않으면 IoT를 활성화하지 말고, 이미 켜져 있으면 끄세요. 이 번역과 영어 원문이 다르면 영어 원문이 우선합니다. 번역을 읽거나 언어를 바꾸는 것만으로는 동의가 기록되거나 권한이 부여되지 않습니다.
+
+문의: hi@mekahime.com
+<!-- /iot-disclaimer:ko -->
 
 <!-- iot-disclaimer:ja -->
 ## 日本語

@@ -51,6 +51,7 @@ from typing import Optional
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import setup_tts as base  # noqa: E402  (shared helpers: run, pip, Steps, the summary rows)
 from setup_tts import ROWS, IS_MAC, IS_WIN, SetupError, log, long_folder_warning, row, too_long_hint  # noqa: E402
+from cli_i18n import choose, language_from_args, text  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 ENVS = ROOT / "envs"
@@ -160,19 +161,21 @@ def parse_gpu(text: str) -> Optional[tuple[str, int]]:
     return None
 
 
-def vision_wanted(mode: str, device: str, gpu: Optional[tuple[str, int]]) -> tuple[bool, str]:
+def vision_wanted(mode: str, device: str, gpu: Optional[tuple[str, int]], lang: str = 'en') -> tuple[bool, str]:
     """(install her eyes, why) for --vision auto|on|off."""
     if mode == "off":
-        return False, "skipped (--vision off)"
+        return False, choose(lang, 'skipped (--vision off)', '건너뜀 (--vision off)')
     if mode == "on":
-        return True, "--vision on" + ("" if device == "cuda" else " (on the CPU: very slow)")
+        return True, "--vision on" + ("" if device == "cuda" else choose(lang, ' (on the CPU: very slow)', ' (CPU에서 실행하므로 매우 느립니다)'))
     if device != "cuda" or gpu is None:
-        return False, "skipped: no NVIDIA GPU (her eyes need about 4.3 GB of VRAM; --vision on installs them anyway)"
+        return False, choose(lang, 'skipped: no NVIDIA GPU (her eyes need about 4.3 GB of VRAM; --vision on installs them anyway)',
+            '건너뜀: NVIDIA GPU가 없습니다 (카메라 모델은 VRAM 약 4.3 GB 필요, --vision on으로 설치 가능)')
     if gpu[1] < VISION_MIN_MIB:
-        return False, (f"skipped: {gpu[0]} has {gpu[1] / 1024:.0f} GB and her eyes need about 4.3 GB more next to her "
+        return False, choose(lang, f"skipped: {gpu[0]} has {gpu[1] / 1024:.0f} GB and her eyes need about 4.3 GB more next to her "
                        "ears, memory and voice (16 GB cards). --vision on installs them anyway; then set "
-                       "\"vision\": {\"enabled\": true} in settings.json")
-    return True, f"{gpu[0]} has {gpu[1] / 1024:.0f} GB"
+                       "\"vision\": {\"enabled\": true} in settings.json",
+                       f'{gpu[0]}의 VRAM은 {gpu[1] / 1024:.0f} GB입니다. 카메라는 음성·기억 외에 약 4.3 GB가 더 필요하여 건너뜁니다 (16 GB 카드 기준). --vision on으로 설치한 뒤 settings.json에서 "vision": {{"enabled": true}} 설정')
+    return True, choose(lang, '{gpu} has {size} GB', '{gpu} · VRAM {size} GB', gpu=gpu[0], size=f'{gpu[1] / 1024:.0f}')
 
 
 def probe(vpy: Path, modules: list[str]) -> dict:
@@ -199,11 +202,11 @@ def damaged_dists(found: dict) -> list[str]:
     return out
 
 
-def torch_note(found: dict) -> str:
+def torch_note(found: dict, lang: str = 'en') -> str:
     if "torch" not in found["ok"]:
         return ""
     gpu = found["ok"].get("_gpu")
-    return f"; torch {found['ok']['torch']}, " + (f"CUDA OK on {gpu}" if gpu else "CPU")
+    return f"; torch {found['ok']['torch']}, " + (choose(lang, 'CUDA OK on {gpu}', '{gpu}에서 CUDA 사용 가능', gpu=gpu) if gpu else "CPU")
 
 
 def digest(*files: Path) -> str:
@@ -228,21 +231,24 @@ def synced_by_onedrive(folder: Path) -> bool:
 
 
 # ---- environments -----------------------------------------------------------------------------------------------
-def make_env(folder: Path, base_py: list[str]) -> tuple[Path, str]:
+def make_env(folder: Path, base_py: list[str], lang: str = 'en') -> tuple[Path, str]:
     """An environment at folder (created, repaired or reused); returns (python, how)."""
     vpy = env_python(folder)
     if vpy.is_file():
         v = base.py_version([str(vpy)])
         if v is not None and not base.ok_version(v):
-            raise SetupError(f"{rel(folder)} uses Python {'.'.join(map(str, v))}; OpenAmika needs {base.PY_RANGE}: "
-                             f"delete the folder {rel(folder)} and run this script again")
+            raise SetupError(choose(lang,
+                '{folder} uses Python {version}; OpenAmika needs {required}: delete the folder {folder} and run this script again',
+                '{folder}의 Python 버전은 {version}이며 {required} 버전이 필요합니다. 해당 환경 폴더를 확인하고 필요한 내용을 백업한 뒤 재생성하세요',
+                folder=rel(folder), version='.'.join(map(str, v)), required=base.PY_RANGE))
         if v is not None and base.pip_works(vpy):
-            kind = "conda environment" if (folder / "conda-meta").is_dir() else "existing"
+            kind = choose(lang, 'conda environment', 'conda 환경') if (folder / "conda-meta").is_dir() else choose(lang, 'existing', '기존 환경')
             return vpy, f"Python {'.'.join(map(str, v))}, {kind}"
         if (folder / "conda-meta").is_dir():
-            raise SetupError(f"{rel(folder)} is a conda environment whose Python does not start or has no pip: delete "
-                             "the folder and run this script again (it makes a venv)")
-        log(f"{rel(folder)} is incomplete; creating it again")
+            raise SetupError(choose(lang,
+                '{folder} is a conda environment whose Python does not start or has no pip: delete the folder and run this script again (it makes a venv)',
+                '{folder} conda 환경의 Python이 실행되지 않거나 pip가 없습니다. 환경 폴더의 필요한 내용을 백업한 뒤 제거하고 다시 실행하면 venv를 만듭니다', folder=rel(folder)))
+        log(choose(lang, '{folder} is incomplete; creating it again', '{folder} 환경이 불완전하여 다시 생성합니다', folder=rel(folder)))
         clear = True
     else:
         clear = folder.is_dir() and any(folder.iterdir())
@@ -250,14 +256,15 @@ def make_env(folder: Path, base_py: list[str]) -> tuple[Path, str]:
     base.run(base_py + ["-m", "venv", *(["--clear"] if clear else []), str(folder)])
     vpy = env_python(folder)
     if not base.pip_works(vpy):
-        raise SetupError(f"{rel(folder)} was created without pip" +
+        raise SetupError(choose(lang, '{folder} was created without pip', '{folder} 환경에 pip가 설치되지 않았습니다', folder=rel(folder)) +
                          (" (Debian/Ubuntu: sudo apt install python3.11-venv)" if sys.platform.startswith("linux") else ""))
     base.run([str(vpy), "-m", "pip", "install", "--disable-pip-version-check", "-q", "-U", "pip", "wheel"])
     v = base.py_version([str(vpy)]) or (0, 0, 0)
-    return vpy, f"Python {'.'.join(map(str, v))}, {'created again' if clear else 'created'}"
+    how = choose(lang, 'created again', '다시 생성됨') if clear else choose(lang, 'created', '생성됨')
+    return vpy, f"Python {'.'.join(map(str, v))}, {how}"
 
 
-def ensure_torch(vpy: Path, folder: Path, packages: tuple[str, ...], device: str, reinstall: bool) -> Optional[Path]:
+def ensure_torch(vpy: Path, folder: Path, packages: tuple[str, ...], device: str, reinstall: bool, lang: str = 'en') -> Optional[Path]:
     """torch (and torchaudio / torchvision) at TORCH_PINS for this device, held by a constraints file; None when the
     environment needs no torch."""
     if not packages:
@@ -272,8 +279,10 @@ def ensure_torch(vpy: Path, folder: Path, packages: tuple[str, ...], device: str
         good = good and not have.get("_cuda")
     damaged = [p for p in packages if p in found.get("broken", {}) and not too_long_hint(found["bad"].get(p, ""))]
     if not good or reinstall:
-        log(f"installing {' + '.join(f'{p} {want[p]}' for p in packages)} into {rel(folder)} "
-            f"({'CUDA 12.8' if device == 'cuda' else device}; about 3 GB, downloaded once for every environment)")
+        log(choose(lang,
+            'installing {packages} into {folder} ({device}; about 3 GB, downloaded once for every environment)',
+            '{folder}에 {packages} 설치 중 ({device}, 약 3 GB, 다운로드 캐시는 환경 간에 재사용)',
+            packages=' + '.join(f'{p} {want[p]}' for p in packages), folder=rel(folder), device='CUDA 12.8' if device == 'cuda' else device))
         idx = [] if device == "mac" else ["--index-url", TORCH_INDEX[device]]
         base.pip(vpy, *idx, *(f"{p}=={want[p]}" for p in packages))
         # installed but damaged, or --reinstall: pip calls the build satisfied, so put the same files in place again
@@ -287,43 +296,53 @@ def ensure_torch(vpy: Path, folder: Path, packages: tuple[str, ...], device: str
 
 def ensure_env(key: str, base_py: list[str], device: str, args: argparse.Namespace) -> Path:
     """One environment: venv, torch, its requirements file (pip only when it changed), then its imports."""
+    lang = getattr(args, 'lang', 'en')
     name, req_rel, torch_pkgs, modules = ENV_SPECS[key]
     folder = ENVS / name
     if args.check:
         vpy = env_python(folder)
         if not vpy.is_file():
-            raise SetupError(f"{rel(folder)} is not created yet: run this script without --check")
-        how = "existing"
+            raise SetupError(choose(getattr(args, 'lang', 'en'),
+                                    '{folder} is not created yet: run this script without --check',
+                                    '{folder} 환경이 아직 없습니다. --check 없이 이 스크립트를 실행하세요', folder=rel(folder)))
+        how = choose(lang, 'existing', '기존 환경')
     else:
-        vpy, how = make_env(folder, base_py)
+        vpy, how = make_env(folder, base_py, lang=lang)
     req = ROOT / req_rel
-    cons = None if args.check else ensure_torch(vpy, folder, torch_pkgs, device, args.reinstall)
+    cons = None if args.check else ensure_torch(vpy, folder, torch_pkgs, device, args.reinstall, lang=lang)
     stamp = folder / "openamika-requirements.sha256"
     want = digest(req, *([cons] if cons else []))
     fresh = stamp.is_file() and stamp.read_text(encoding="utf-8").strip() == want
     found = probe(vpy, modules)
     if not args.check and (args.reinstall or not fresh or found["bad"]):
-        log(f"installing {req_rel} into {rel(folder)}" + (" (torch stays pinned)" if cons else ""))
+        log(choose(lang, 'installing {requirements} into {folder}', '{folder}에 {requirements} 설치 중', requirements=req_rel, folder=rel(folder)) +
+            (choose(lang, ' (torch stays pinned)', ' (torch 버전 고정 유지)') if cons else ''))
         base.pip(vpy, "-r", str(req), *(["-c", str(cons)] if cons else []))
         stamp.write_text(want, encoding="utf-8")
         found = probe(vpy, modules)
-        how += f"; {req_rel} installed"
+        how += choose(lang, '; {requirements} installed', '; {requirements} 설치됨', requirements=req_rel)
         redo = damaged_dists(found)
         if redo:
-            log(f"installing {', '.join(redo)} into {rel(folder)} again: installed, but it does not import (damaged files)")
+            log(choose(lang, 'installing {packages} into {folder} again: installed, but it does not import (damaged files)',
+                '{folder}에 {packages} 재설치 중: 설치되었지만 가져올 수 없습니다 (손상된 파일)', packages=', '.join(redo), folder=rel(folder)))
             base.pip(vpy, "--force-reinstall", "--no-deps", *redo, *(["-c", str(cons)] if cons else []))
             found = probe(vpy, modules)
-            how += f"; {', '.join(d.split('==')[0] for d in redo)} installed again"
+            how += choose(lang, '; {packages} installed again', '; {packages} 재설치됨', packages=', '.join(d.split('==')[0] for d in redo))
     if found["bad"]:
         names = ", ".join(f"{k} ({v})" for k, v in list(found["bad"].items())[:3])
         hint = too_long_hint(" ".join(found["bad"].values()))
-        raise SetupError(f"{rel(vpy)}: these do not import: {names}. "
+        raise SetupError(choose(lang, f"{rel(vpy)}: these do not import: {names}. "
                          + (hint[0].upper() + hint[1:] if hint else "Run this script without --check" if args.check else
-                            "Run this script again with --reinstall; if it repeats, see the pip output above"))
+                            "Run this script again with --reinstall; if it repeats, see the pip output above"),
+                         f'{rel(vpy)}에서 모듈을 가져오지 못했습니다. ' +
+                         ('Windows 경로를 짧게 변경하세요. ' if hint else '--check 없이 설치하세요. ' if args.check else
+                          '--reinstall로 다시 실행하고 반복되면 위 pip 출력을 확인하세요. ') + f'원문: {names}'))
     if device == "cuda" and "torch" in torch_pkgs and not found["ok"].get("_cuda_ok"):
-        raise SetupError(f"{rel(vpy)}: torch {found['ok'].get('torch')} does not see the GPU (CUDA): update the NVIDIA "
-                         "driver (https://www.nvidia.com/drivers), then run this script again; or run it with --cpu")
-    row("OK ", ROW_NAMES[key], f"{rel(vpy)} ({how}{torch_note(found)})")
+        raise SetupError(choose(lang,
+            '{python}: torch {version} does not see the GPU (CUDA): update the NVIDIA driver (https://www.nvidia.com/drivers), then run this script again; or run it with --cpu',
+            '{python}: torch {version}이 GPU (CUDA)를 인식하지 못합니다. NVIDIA 드라이버를 업데이트한 뒤 다시 실행하거나 --cpu를 사용하세요',
+            python=rel(vpy), version=found['ok'].get('torch')))
+    row("OK ", ROW_NAMES[key], f"{rel(vpy)} ({how}{torch_note(found, lang=lang)})")
     return vpy
 
 
@@ -333,10 +352,15 @@ def ensure_speech_model(args: argparse.Namespace) -> None:
     cmd = [sys.executable, "-X", "utf8", str(ROOT / "scripts" / "download_sensevoice.py"), *(["--verify"] if args.check else [])]
     p = subprocess.run(cmd, capture_output=args.check, text=True, encoding="utf-8", errors="replace")
     if p.returncode != 0:
-        raise SetupError("speech/models/ is not complete" + (": run this script without --check" if args.check else
-                         " (see the lines above): run this script again (finished files are kept), or download the files "
-                         "by hand from https://www.modelscope.cn/models/iic/SenseVoiceSmall into speech/models/"))
-    row("OK ", "speech model", "speech/models/ (SenseVoiceSmall, 6 files verified by SHA-256)")
+        raise SetupError(choose(getattr(args, 'lang', 'en'),
+            "speech/models/ is not complete" + (": run this script without --check" if args.check else
+            " (see the lines above): run this script again (finished files are kept), or download the files "
+            "by hand from https://www.modelscope.cn/models/iic/SenseVoiceSmall into speech/models/"),
+            'speech/models/ 파일이 불완전합니다. ' + ('--check 없이 이 스크립트를 실행하세요' if args.check else
+            '위 오류를 확인하고 다시 실행하세요. 완료된 파일은 유지됩니다')))
+    row("OK ", "speech model", choose(getattr(args, 'lang', 'en'),
+        'speech/models/ (SenseVoiceSmall, 6 files verified by SHA-256)',
+        'speech/models/ (SenseVoiceSmall, 파일 6개의 SHA-256 검증 완료)'))
 
 
 def hf_cached(repo: str) -> Optional[Path]:
@@ -351,33 +375,40 @@ def ensure_hf_model(label: str, vpy: Path, folder: Path, repo: str, cmd: list[st
                     args: argparse.Namespace) -> None:
     """A model the service downloads into the Hugging Face cache on its first start, fetched now instead: the
     service's own loader runs once with --download. A marker in the environment folder records that it finished."""
+    lang = getattr(args, 'lang', 'en')
     marker = folder / "openamika-model.json"
     try:
         done = json.loads(marker.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         done = {}
     if Path(repo).expanduser().is_dir():           # settings.json names a model folder on this PC: nothing to fetch
-        row("OK ", label, f"{repo} (a folder on this PC)")
+        row("OK ", label, choose(lang, '{repo} (a folder on this PC)', '{repo} (이 PC의 폴더)', repo=repo))
         return
     snap = hf_cached(repo)
     if snap is not None and (done.get("model") == repo or args.check):
-        row("OK ", label, f"{repo} in the Hugging Face cache ({snap.parent.parent})")
+        row("OK ", label, choose(lang, '{repo} in the Hugging Face cache ({folder})',
+                                '{repo} Hugging Face 캐시 확인됨 ({folder})', repo=repo, folder=snap.parent.parent))
         return
     if args.check:
-        raise SetupError(f"{repo} ({size}) is not downloaded yet: run this script without --check (otherwise the first "
-                         "start downloads it)")
-    log(f"downloading {repo} ({size}) into the Hugging Face cache (a public model: no Hugging Face token needed)")
+        raise SetupError(choose(getattr(args, 'lang', 'en'),
+            '{repo} ({size}) is not downloaded yet: run this script without --check (otherwise the first start downloads it)',
+            '{repo} ({size}) 모델이 아직 없습니다. --check 없이 실행하면 다운로드합니다 (그렇지 않으면 첫 실행 시 다운로드)',
+            repo=repo, size=size))
+    log(choose(lang, 'downloading {repo} ({size}) into the Hugging Face cache (a public model: no Hugging Face token needed)',
+               '{repo} ({size}) 다운로드 중: Hugging Face 캐시에 저장합니다 (공개 모델이므로 Hugging Face 토큰 불필요)', repo=repo, size=size))
     # HF_HUB_VERBOSITY=error: the Hub's "you are sending unauthenticated requests" notice is not a problem here
     env = {**os.environ, "HF_HUB_VERBOSITY": os.environ.get("HF_HUB_VERBOSITY") or "error"}
     p = subprocess.run([str(vpy), "-X", "utf8", *cmd], cwd=str(ROOT), text=True, encoding="utf-8", errors="replace",
                        env=env)
     snap = hf_cached(repo)
     if p.returncode != 0 or snap is None:
-        raise SetupError(f"{repo} could not be downloaded (see the lines above): check the internet connection and "
-                         "run this script again (finished files are kept)")
+        raise SetupError(choose(getattr(args, 'lang', 'en'),
+            '{repo} could not be downloaded (see the lines above): check the internet connection and run this script again (finished files are kept)',
+            '{repo} 다운로드 실패. 위 오류와 인터넷 연결을 확인하고 다시 실행하세요 (완료된 파일은 유지됩니다)', repo=repo))
     marker.write_text(json.dumps({"model": repo, "snapshot": str(snap), "at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}),
                       encoding="utf-8")
-    row("OK ", label, f"{repo} in the Hugging Face cache ({snap.parent.parent}, downloaded)")
+    row("OK ", label, choose(lang, '{repo} in the Hugging Face cache ({folder}, downloaded)',
+                            '{repo} Hugging Face 캐시에 다운로드 완료 ({folder})', repo=repo, folder=snap.parent.parent))
 
 
 # ---- settings.json and brain/.env ---------------------------------------------------------------------------------
@@ -418,7 +449,7 @@ def chosen_models() -> tuple[str, str]:
     return str(emb or EMBED_MODEL_DEFAULT), str(vis or VISION_MODEL_DEFAULT)
 
 
-def vision_repo(key: str) -> str:
+def vision_repo(key: str, lang: str = 'en') -> str:
     """The Hugging Face repository of a vision model key, from vision/vlm_service.py's MODELS (read, not imported)."""
     import ast
     try:
@@ -429,8 +460,10 @@ def vision_repo(key: str) -> str:
     except (OSError, SyntaxError, ValueError, TypeError, AttributeError, IndexError, StopIteration):
         models = {VISION_MODEL_DEFAULT: "Qwen/Qwen3-VL-2B-Instruct"}
     if key not in models:
-        raise SetupError(f"settings.json names the vision model {key!r}, which vision/vlm_service.py does not know "
-                         f"(it knows {', '.join(sorted(models))}): fix \"vision\": {{\"model\": …}} in settings.json")
+        raise SetupError(choose(lang,
+            'settings.json names the vision model {key!r}, which vision/vlm_service.py does not know (it knows {models}): fix "vision": {{"model": …}} in settings.json',
+            'settings.json의 카메라 모델 {key!r}을 vision/vlm_service.py에서 지원하지 않습니다 (지원 모델: {models}). settings.json의 "vision": {{"model": …}}를 수정하세요',
+            key=key, models=', '.join(sorted(models))))
     return models[key]
 
 
@@ -438,22 +471,29 @@ def ensure_settings(device: str, vision_on: bool, args: argparse.Namespace) -> N
     """settings.json: created from settings.example.json, or an existing one checked (never changed). It runs after
     the environment steps; an interpreter it names under envs\\ that is not there yet is left to that environment's
     own row (a failed or interrupted step), so a re-run never fails here for what it is still making."""
+    lang = getattr(args, 'lang', 'en')
     path = ROOT / "settings.json"
     if not path.is_file():
         if args.check:
-            raise SetupError("settings.json is not created yet: run this script without --check")
+            raise SetupError(choose(getattr(args, 'lang', 'en'),
+                                    'settings.json is not created yet: run this script without --check',
+                                    'settings.json이 아직 없습니다. --check 없이 이 스크립트를 실행하세요'))
         cfg = settings_from_example(device, vision_on)
         path.write_text(json.dumps(cfg, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        row("OK ", "settings.json", f"created from settings.example.json (interpreters in envs\\, speech on "
-                                    f"{cfg['speech_device']}, vision {'on' if vision_on else 'off'})")
+        row("OK ", "settings.json", choose(lang,
+            'created from settings.example.json (interpreters in envs\\, speech on {device}, vision {vision})',
+            'settings.example.json에서 생성했습니다 (Python 경로: envs/, 음성 인식: {device}, 카메라: {vision})',
+            device=cfg['speech_device'], vision='on' if vision_on else 'off'))
         return
     try:
         cfg = json.loads(path.read_text(encoding="utf-8-sig"))
         if not isinstance(cfg, dict):
             raise ValueError("not a JSON object")
     except (OSError, ValueError) as e:
-        raise SetupError(f"settings.json cannot be read ({e}): fix it, or delete it and run this script again (it is "
-                         "created again from settings.example.json)") from e
+        raise SetupError(choose(getattr(args, 'lang', 'en'),
+            'settings.json cannot be read ({error}): fix it, or delete it and run this script again (it is created again from settings.example.json)',
+            'settings.json을 읽을 수 없습니다 ({error}). 파일을 수정하세요. 재생성이 필요하면 기존 설정을 백업한 뒤 settings.example.json을 참고하세요',
+            error=e)) from e
     eyes_on = bool((cfg.get("vision") or {}).get("enabled"))
     named = [("brain_python", cfg.get("brain_python")), ("speech_python", cfg.get("speech_python")),
              ("embedder.python", (cfg.get("embedder") or {}).get("python"))]
@@ -469,34 +509,42 @@ def ensure_settings(device: str, vision_on: bool, args: argparse.Namespace) -> N
         folder, row_name = SETTINGS_ENVS[key]
         made = env_python(ENVS / folder)
         if key == "vision.python" and not vision_on and not made.is_file():
-            raise SetupError("settings.json turns her eyes on (\"vision\": {\"enabled\": true}), but they are not "
-                             "installed: run this script with --vision on, or set \"enabled\": false there")
+            raise SetupError(choose(lang,
+                'settings.json turns her eyes on ("vision": {"enabled": true}), but they are not installed: run this script with --vision on, or set "enabled": false there',
+                'settings.json에서 카메라가 켜져 있지만 ("vision": {"enabled": true}) 설치되지 않았습니다. --vision on으로 설치하거나 "enabled": false로 변경하세요'))
         inside = given.resolve().is_relative_to(ENVS.resolve())
         if inside and not made.is_file():
-            waiting.append(f"{value} (see the {row_name} row)")   # not made yet: that environment's row says why
+            waiting.append(choose(lang, '{value} (see the {row} row)', '{value} ({row} 항목 참고)', value=value, row=row_name))
         else:
             missing.append((key, value, made))
     if missing:
         key, value, made = missing[0]
-        raise SetupError(f"settings.json names {value} as {key}, which does not exist" +
+        raise SetupError(choose(lang, f"settings.json names {value} as {key}, which does not exist" +
                          (f" (and {len(missing) - 1} more)" if len(missing) > 1 else "") +
                          f": point {key} at {rel(made)}" + (", the environment this script made" if made.is_file() else "") +
-                         ", or delete settings.json and run this script again (it is created again)")
+                         ", or delete settings.json and run this script again (it is created again)",
+                         f'settings.json의 {key} 경로 {value}가 없습니다 (누락 {len(missing)}개). {key}를 {rel(made)}로 수정하세요. 설정을 재생성하려면 먼저 기존 설정을 백업하세요'))
     if waiting:
-        row("-- ", "settings.json", f"existing, not changed; it names {', '.join(waiting)}, which is not made yet")
+        row("-- ", "settings.json", choose(lang, 'existing, not changed; it names {waiting}, which is not made yet',
+            '기존 설정을 변경하지 않았습니다. 아직 생성되지 않은 환경: {waiting}', waiting=', '.join(waiting)))
         return
     note = ""
     if vision_on and not eyes_on:
-        note = "; her eyes are installed but off: set \"vision\": {\"enabled\": true} to use them"
-    row("OK ", "settings.json", f"existing, not changed (its interpreters exist{note})")
+        note = choose(lang, '; her eyes are installed but off: set "vision": {"enabled": true} to use them',
+                      '; 카메라는 설치되었지만 꺼져 있습니다. 사용하려면 "vision": {"enabled": true} 설정')
+    row("OK ", "settings.json", choose(lang, 'existing, not changed (its interpreters exist{note})',
+                                       '기존 설정을 변경하지 않았습니다 (Python 실행 파일 확인됨{note})', note=note))
 
 
 def ensure_env_file(args: argparse.Namespace) -> None:
+    lang = getattr(args, 'lang', 'en')
     path = ROOT / "brain" / ".env"
     created = False
     if not path.is_file():
         if args.check:
-            row("-- ", "brain/.env", "not created yet (this script copies .env.example there; the wizard writes your key)")
+            row("-- ", "brain/.env", choose(getattr(args, 'lang', 'en'),
+                'not created yet (this script copies .env.example there; the wizard writes your key)',
+                '아직 없습니다 (설치 시 .env.example을 복사하며, 첫 설정 마법사에서 키를 저장합니다)'))
             return
         shutil.copyfile(ROOT / ".env.example", path)
         created = True
@@ -504,25 +552,31 @@ def ensure_env_file(args: argparse.Namespace) -> None:
     for line in path.read_text(encoding="utf-8-sig", errors="replace").splitlines():
         if line.strip().startswith("OPENROUTER_API_KEY="):
             key = line.split("=", 1)[1].strip().strip('"').strip("'")
-    made = "created from .env.example; " if created else ""
+    made = choose(lang, 'created from .env.example; ', '.env.example에서 생성했습니다. ') if created else ''
     if key and not key.startswith("sk-or-v1-your"):
-        row("OK ", "brain/.env", f"{made}OpenRouter key set (...{key[-4:]})")
+        row("OK ", "brain/.env", made + choose(lang, 'OpenRouter key set (...{tail})', 'OpenRouter 키 설정됨 (...{tail})', tail=key[-4:]))
     else:
-        row("-- ", "brain/.env", f"{made}no OpenRouter key yet: the first-run wizard on the Use page takes it (or put it "
-                                 "after OPENROUTER_API_KEY= in brain\\.env); fully local with Ollama needs none")
+        row("-- ", "brain/.env", made + choose(lang,
+            'no OpenRouter key yet: the first-run wizard on the Use page takes it (or put it after OPENROUTER_API_KEY= in brain\\.env); fully local with Ollama needs none',
+            'OpenRouter 키가 없습니다. 사용 화면의 첫 설정 또는 brain/.env의 OPENROUTER_API_KEY= 뒤에 입력하세요. Ollama 로컬 전용 실행에는 필요하지 않습니다'))
 
 
 # ---- main -------------------------------------------------------------------------------------------------------
 def main(argv: Optional[list[str]] = None) -> int:
-    ap = argparse.ArgumentParser(description="Set up OpenAmika's brain, ears, memory and eyes (her voice and Live2D model: "
-                                             "scripts/setup_tts.py)")
-    ap.add_argument("--cpu", action="store_true", help="no NVIDIA GPU: CPU builds of torch; speech and memory run on the CPU")
+    lang = language_from_args(argv)
+    ap = argparse.ArgumentParser(description=choose(lang,
+        "Set up OpenAmika's brain, ears, memory and eyes (her voice and Live2D model: scripts/setup_tts.py)",
+        'OpenAmika 대화·음성 인식·기억·카메라 설치 (음성과 Live2D 모델: scripts/setup_tts.py)'))
+    ap.add_argument('--lang', choices=('en', 'ko'), default='en', help=text('language', lang))
+    ap.add_argument("--cpu", action="store_true", help=choose(lang,
+        "no NVIDIA GPU: CPU builds of torch; speech and memory run on the CPU", 'NVIDIA GPU 없이 CPU용 torch로 음성 인식과 기억을 실행합니다'))
     ap.add_argument("--vision", choices=("auto", "on", "off"), default="auto",
-                    help="her eyes (the camera, Qwen3-VL-2B, ~4.3 GB of VRAM): auto installs them on a GPU with 16 GB or more")
-    ap.add_argument("--python", default=None, help="the Python 3.11 to make the environments from (default: this one, "
-                                                     "py -3.11, python3.11; then 3.12)")
-    ap.add_argument("--check", action="store_true", help="report what is installed and what is missing; change nothing")
-    ap.add_argument("--reinstall", action="store_true", help="run every pip step again")
+                    help=choose(lang, 'camera: auto installs on GPUs with 16 GB or more',
+                                '카메라 (Qwen3-VL-2B): auto는 VRAM 16 GB 이상 GPU에서 설치합니다'))
+    ap.add_argument("--python", default=None, help=choose(lang, 'Python 3.11 or 3.12 used to create environments',
+                                                       '환경을 생성할 Python 3.11 또는 3.12 실행 파일'))
+    ap.add_argument("--check", action="store_true", help=text('check', lang))
+    ap.add_argument("--reinstall", action="store_true", help=choose(lang, 'run every pip step again', '모든 pip 설치 단계를 다시 실행합니다'))
     args = ap.parse_args(argv)
     for stream in (sys.stdout, sys.stderr):
         try:  # never die on a cp1252 console or a redirected log
@@ -531,19 +585,21 @@ def main(argv: Optional[list[str]] = None) -> int:
             pass
     ROWS.clear()
     t0 = time.time()
-    log(f"OpenAmika setup -> {ROOT}{'  (--check: nothing is changed)' if args.check else ''}  "
+    log(choose(lang, 'OpenAmika setup', 'OpenAmika 설치') + f" -> {ROOT}" +
+        (choose(lang, '  (--check: nothing is changed)', '  (--check: 변경하지 않음)') if args.check else '') + '  ' +
         f"({platform.system()} {platform.machine()}, Python {platform.python_version()})")
     if not args.check:
         free = base.disk_free_gb(ROOT)
         if free is not None and free < 45:
-            log(f"WARNING: only {free:.0f} GB free; OpenAmika with her voice needs about 45 GB (40 GB without her eyes; "
-                "`pip cache purge` afterwards gives back about 6 GB)")
+            log(choose(lang,
+                'WARNING: only {free} GB free; OpenAmika with her voice needs about 45 GB (40 GB without her eyes; `pip cache purge` afterwards gives back about 6 GB)',
+                '주의: 여유 공간이 {free} GB뿐입니다. 음성 포함 약 45 GB가 필요합니다 (카메라 제외 40 GB, 설치 후 pip cache purge로 약 6 GB 회수 가능)', free=f'{free:.0f}'))
         warning = long_folder_warning(ROOT)
         if warning:
-            log(warning)
+            log(choose(lang, '{warning}', '주의: Windows 경로가 너무 길 수 있습니다. C:\\OpenAmika 같은 짧은 폴더를 사용하세요. 원문: {warning}', warning=warning))
         if synced_by_onedrive(ROOT):
-            log("WARNING: this folder is synced by OneDrive: its environments and models (tens of thousands of files, "
-                "~45 GB) would be uploaded too. A folder outside OneDrive (for example C:\\OpenAmika) is better")
+            log(choose(lang, 'WARNING: this folder is synced by OneDrive: its environments and models (tens of thousands of files, ~45 GB) would be uploaded too. A folder outside OneDrive (for example C:\\OpenAmika) is better',
+                '주의: 이 폴더는 OneDrive 동기화 대상입니다. 환경과 모델 (수만 개 파일, 약 45 GB)도 업로드될 수 있습니다. C:\\OpenAmika처럼 OneDrive 밖의 폴더를 사용하세요'))
     rc = 0
     steps = base.Steps()
     try:
@@ -553,20 +609,23 @@ def main(argv: Optional[list[str]] = None) -> int:
                 base_py, v = base.find_base_python(args.python)
                 row("OK ", "Python", f"{'.'.join(map(str, v))} ({' '.join(base_py)})")
             except SetupError as e:
-                row("!! ", "Python", str(e))
+                row("!! ", "Python", choose(lang, '{error}', 'Python 환경을 준비할 수 없습니다. Python 3.11 또는 3.12 경로를 --python으로 지정하세요. 원문: {error}', error=e))
                 steps.failed.append("Python")
         gpu = None if args.cpu else gpu_info()
         device = "mac" if IS_MAC and not args.cpu else ("cuda" if gpu else "cpu")
         if gpu:
-            row("OK ", "GPU", f"{gpu[0]}, {gpu[1] / 1024:.0f} GB: CUDA 12.8 builds")
+            row("OK ", "GPU", choose(lang, '{gpu}, {size} GB: CUDA 12.8 builds', '{gpu}, {size} GB: CUDA 12.8 빌드 사용', gpu=gpu[0], size=f'{gpu[1] / 1024:.0f}'))
         elif not IS_MAC:
-            row("-- ", "GPU", "CPU builds (--cpu): speech recognition and memory run on the CPU, slower" if args.cpu else
+            row("-- ", "GPU", choose(lang, "CPU builds (--cpu): speech recognition and memory run on the CPU, slower" if args.cpu else
                 "no NVIDIA GPU found (nvidia-smi): CPU builds, so speech recognition and memory run on the CPU, slower. "
-                "With an NVIDIA card, install its driver and run this script again")
-        vision_on, why = vision_wanted(args.vision, device, gpu)
+                "With an NVIDIA card, install its driver and run this script again",
+                'CPU 빌드 사용 (--cpu): 음성 인식과 기억을 CPU에서 실행하므로 느립니다' if args.cpu else
+                'NVIDIA GPU를 찾지 못했습니다 (nvidia-smi). 음성 인식과 기억을 CPU에서 실행합니다. NVIDIA 카드가 있다면 드라이버 설치 후 다시 실행하세요'))
+        vision_on, why = vision_wanted(args.vision, device, gpu, lang=lang)
         if args.check:      # check what is there: her eyes count when installed, switched on, or asked for
-            why = ("not installed yet: this script installs them on this GPU" if vision_on else
-                   f"not installed ({why.removeprefix('skipped: ')})")
+            why = (choose(lang, 'not installed yet: this script installs them on this GPU',
+                          '아직 설치되지 않았습니다. 이 GPU에서 설치할 수 있습니다') if vision_on else
+                   choose(lang, f"not installed ({why.removeprefix('skipped: ')})", f'설치되지 않았습니다 ({why})'))
             vision_on = (ENVS / "vision").is_dir() or args.vision == "on" or settings_vision_enabled()
         needs = () if args.check else ("Python",)
         emb_model, vis_key = chosen_models()           # an existing settings.json may name other models
@@ -576,14 +635,14 @@ def main(argv: Optional[list[str]] = None) -> int:
         embed = steps.run("memory (embedder)", ensure_env, "memory", base_py, device, args, needs=needs)
         steps.run("memory model", ensure_hf_model, "memory model", embed, ENVS / "embed", emb_model,
                   ["brain/embed_server.py", "--download", "--model", emb_model],
-                  "~2.3 GB" if emb_model == EMBED_MODEL_DEFAULT else "size depends on the model", args,
+                  "~2.3 GB" if emb_model == EMBED_MODEL_DEFAULT else choose(lang, 'size depends on the model', '크기는 모델에 따라 다름'), args,
                   needs=("memory (embedder)",))
         if vision_on:
             eyes = steps.run("vision (her eyes)", ensure_env, "vision", base_py, device, args, needs=needs)
             steps.run("vision model", lambda: ensure_hf_model(
-                "vision model", eyes, ENVS / "vision", vision_repo(vis_key),
+                "vision model", eyes, ENVS / "vision", vision_repo(vis_key, lang=lang),
                 ["vision/vlm_service.py", "--download", "--model", vis_key],
-                "~4.3 GB" if vis_key == VISION_MODEL_DEFAULT else "size depends on the model", args),
+                "~4.3 GB" if vis_key == VISION_MODEL_DEFAULT else choose(lang, 'size depends on the model', '크기는 모델에 따라 다름'), args),
                 needs=("vision (her eyes)",))
         else:
             row("-- ", "vision (her eyes)", why)
@@ -592,30 +651,35 @@ def main(argv: Optional[list[str]] = None) -> int:
         steps.run("settings.json", ensure_settings, device, vision_on, args)
         steps.run("brain/.env", ensure_env_file, args)
     except KeyboardInterrupt:
-        row("!! ", "interrupted", "Ctrl-C (run this script again to resume; finished steps are kept)")
+        row("!! ", "interrupted", choose(lang, 'Ctrl-C (run this script again to resume; finished steps are kept)',
+                                         'Ctrl-C로 중단했습니다. 다시 실행하면 완료된 단계는 유지하고 이어서 진행합니다'))
         rc = 130
 
     width = max((len(n) for _, n, _ in ROWS), default=10)
     print("\n" + "=" * 78)
-    print(f"OpenAmika setup summary ({time.time() - t0:.0f} s)")
+    print(text('setup_summary', lang, seconds=f'{time.time() - t0:.0f}'))
     for mark, name, detail in ROWS:
         print(f"  {mark}{name.ljust(width)}  {detail}")
     bad = rc != 0 or any(m.strip() == "!!" for m, _, _ in ROWS)
     print("=" * 78)
     brain_py = rel(env_python(ENVS / "brain"))
     if bad:
-        print("Fix the !! lines above and run this script again (finished steps are skipped)." if not args.check else
-              "Not ready: run this script without --check to install what is missing.")
+        print(text('setup_retry' if not args.check else 'setup_missing', lang))
     elif args.check:
-        print("Her brain, ears, memory" + (" and eyes" if vision_on else "") + " are installed.")
+        print(choose(lang, 'Her brain, ears, memory{eyes} are installed.',
+                     '대화·음성 인식·기억{eyes} 설치가 확인되었습니다.',
+                     eyes=choose(lang, ' and eyes', '·카메라') if vision_on else ''))
     else:
         voice = f"{brain_py} {os.path.join('scripts', 'setup_tts.py')}"
         # PowerShell runs nothing from the current folder without .\ (cmd accepts it as well)
         start = ".\\Start_OpenAmika.bat" if IS_WIN else f"{brain_py} launch.py"
         pad = max(len(voice), len(start)) + 3
-        print("Done. Next:")
-        print(f"  1. {voice.ljust(pad)}her voice, her Live2D model and the paper doll (type yes to accept her license)")
-        print(f"  2. {start.ljust(pad)}start her; the page opens at http://localhost:53000")
+        print(choose(lang, 'Done. Next:', '완료. 다음 단계:'))
+        print(f"  1. {voice.ljust(pad)}" + choose(lang,
+              'her voice, her Live2D model and the paper doll (read the license and accept only if you agree)',
+              '음성·Live2D·도우미 아바타 설치 (라이선스를 읽고 동의하는 경우에만 직접 수락하세요)'))
+        print(f"  2. {start.ljust(pad)}" + choose(lang, 'start her; the page opens at http://localhost:53000',
+                                                        '실행 후 http://localhost:53000 열기'))
     return rc or (1 if bad else 0)
 
 

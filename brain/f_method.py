@@ -191,6 +191,16 @@ class CandidateF(MemoryMethod):
                 accepted.append(fact)
         return [], accepted
 
+    @staticmethod
+    def _lexical_text(item):
+        # Writer summaries/entities can be translated even when the literal
+        # source names are not. Index validated speech as well, without changing
+        # the stored record, its provenance, or existing document vectors.
+        text = MemoryMethod._lexical_text(item)
+        if item.get("kind") == "fact":
+            text += " " + " ".join(q["quote"] for q in item.get("quotes", []))
+        return text
+
     def _provenance_error(self, fact):
         quotes = fact.get("quotes")
         if not isinstance(quotes, list) or not quotes:
@@ -319,14 +329,18 @@ class CandidateF(MemoryMethod):
         zh = lang == "zh"
         if self._newer[fact["id"]]:
             return "（这条后来被更正了，现在的说法见下）" if zh else " (later corrected; the current version follows)"
-        if self._ambiguous_replacements[fact["id"]]:
-            return "（有一条可能是更正，还没确认）" if zh else " (one of these may be a correction; not confirmed)"
         status = _kind(fact.get("status", "active"))
         if status != "active":
             notes = self._STATUS_NOTES[lang]
             return notes.get(status, notes["other"])
         if fact.get("valid_to"):
             return "（当时的情况，现在可能已经变了）" if zh else " (how it was then; it may have changed)"
+        if fact.get("replaces_prior") is True and not self._older[fact["id"]]:
+            return ("（说话者明确作了更正；与旧记录的对应关系尚未确认。按原话中的对象和属性理解，不要推断其他记录已失效）"
+                    if zh else " (explicit correction by the speaker; its link to an earlier record is not verified. "
+                    "Use the subject and property in the quotation, without assuming other records are superseded)")
+        if self._ambiguous_replacements[fact["id"]]:
+            return "（有一条可能是更正，还没确认）" if zh else " (one of these may be a correction; not confirmed)"
         return ""
 
     def _fact_lines(self, fact, now, user_name, lang):

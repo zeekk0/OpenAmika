@@ -117,3 +117,14 @@ class PageOpenerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_cli_catalog_placeholders_and_literal_errors():
+    from scripts.cli_i18n import MESSAGES, choose, text
+    from string import Formatter
+    for key, (en, ko) in MESSAGES.items():
+        fields = lambda value: {field for _, field, _, _ in Formatter().parse(value) if field}
+        assert fields(en) == fields(ko), key
+        params = {name: "한글 {raw}" for name in fields(en)}
+        assert text(key, "ko", **params)
+    assert choose("ko", "raw {error}", "원문 {error}") == "원문 {error}"

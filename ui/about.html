@@ -4,82 +4,85 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#14091a">
-<title>OpenAmika · About</title>
+<title data-i18n="about.title">OpenAmika · About</title>
+<script src="/ui/i18n.js"></script>
+<script src="/ui/locales/common.js"></script>
+<script src="/ui/locales/about.js"></script>
 <link rel="stylesheet" href="/ui/openamika.css">
 </head>
 <body>
 <main class="oa-main about-page">
   <div class="oa-page-head rv" style="--d:0">
-    <h1>About <em>OpenAmika</em></h1>
-    <p class="sub">Who made her, how to support the project, and what you may do with her.</p>
+    <h1 data-i18n="about.heading">About OpenAmika</h1>
+    <p class="sub" data-i18n="about.intro">Who made her, how to support the project, and what you may do with her.</p>
   </div>
 
   <div class="about-col">
     <section class="tech-card rv" style="--d:1">
-      <h3>About MekaHime</h3>
+      <h3 data-i18n="about.team">About MekaHime</h3>
       <a class="about-logo" href="https://www.mekahime.com" target="_blank" rel="noopener" title="mekahime.com"><img src="/ui/assets/mekahime-logo.webp" alt="MekaHime"></a>
-      <p>We are a small team of anime and AI-lovers who want to bring AI waifus to life.</p>
+      <p data-i18n="about.teamText">We are a small team of anime and AI-lovers who want to bring AI waifus to life.</p>
     </section>
 
     <section class="tech-card donate-card rv" style="--d:2" id="support">
-      <a class="donate-giant" href="https://www.mekahime.com/donate" target="_blank" rel="noopener">♥ Support MekaHime</a>
-      <p class="donate-sub">We believe AI waifu is for everyone. They should not be locked behind a paywall.</p>
-      <p class="donate-sub">Amika is 100% open sourced so you can run her locally with controls to all of your private information. But this means we aren't earning a single dollar, so please consider donating to keep this project alive.</p>
+      <a class="donate-giant" href="https://www.mekahime.com/donate" target="_blank" rel="noopener" data-i18n="about.support">♥ Support MekaHime</a>
+      <p class="donate-sub" data-i18n="about.supportBelief">We believe AI waifu is for everyone. They should not be locked behind a paywall.</p>
+      <p class="donate-sub" data-i18n="about.supportText">Amika is 100% open sourced so you can run her locally with controls to all of your private information. But this means we aren't earning a single dollar, so please consider donating to keep this project alive.</p>
     </section>
 
     <section class="tech-card rv" style="--d:3">
-      <h3>About Amika</h3>
-      <p><b>Amika</b> (桜井美香, Sakurai Mika) is MekaHime's AI companion, now <b>open source</b>: 18, raised in Kyoto as a
+      <h3 data-i18n="about.amika">About Amika</h3>
+      <p data-i18n="about.amikaText">Amika (桜井美香, Sakurai Mika) is MekaHime's AI companion, now open source: 18, raised in Kyoto as a
         shrine maiden. She runs on your own machine: ears (local speech recognition), a brain that thinks in three tiers
         and keeps an evidence-based memory, a voice with 69 acted emotions (the OpenAmika voice server, a MekaHime build
         of GPT-SoVITS) and a Live2D body that moves with her voice. The language model is your choice: OpenRouter in the
         cloud (recommended in almost all cases: a few dollars a month) or Ollama locally (a model of 27B or more; 70B
         or more for the full, reliable experience).</p>
-      <p>Project page: <a href="https://www.mekahime.com/openamika" target="_blank" rel="noopener">mekahime.com/openamika</a> ·
-        Source code: <a href="https://github.com/zeekk0/OpenAmika" target="_blank" rel="noopener">github.com/zeekk0/OpenAmika</a></p>
+      <p><span data-i18n="about.project">Project page:</span> <a href="https://www.mekahime.com/openamika" target="_blank" rel="noopener">mekahime.com/openamika</a> ·
+        <span data-i18n="about.source">Source code:</span> <a href="https://github.com/zeekk0/OpenAmika" target="_blank" rel="noopener">github.com/zeekk0/OpenAmika</a></p>
     </section>
 
     <section class="tech-card rv" style="--d:4">
-      <h3>Licenses</h3>
+      <h3 data-i18n="about.licenses">Licenses</h3>
       <div class="table-scroll"><table class="oa-table lic">
-        <thead><tr><th>what</th><th>license</th><th>notes</th></tr></thead>
+        <thead><tr><th data-i18n="about.what">what</th><th data-i18n="about.license">license</th><th data-i18n="about.notes">notes</th></tr></thead>
         <tbody>
-          <tr><td>OpenAmika: all code in this repository (brain, speech layer, these pages, launcher)</td><td class="free">MIT</td><td>as authorized by MekaHime Inc. (<code>LICENSE</code>; bundled third-party files keep their own, see <code>THIRD_PARTY_NOTICES.md</code>)</td></tr>
-          <tr><td>Text-to-speech: the OpenAmika voice server, a MekaHime build of <a href="https://github.com/RVC-Boss/GPT-SoVITS" target="_blank" rel="noopener">GPT-SoVITS</a> (<code>vendor/tts-engine</code>)</td><td class="free">MIT</td><td>upstream GPT-SoVITS is MIT; <code>scripts/setup_tts.py</code> downloads it and public pretrained models under their own licenses</td></tr>
-          <tr><td>Amika's voice model, fine-tuned weights, reference audio and Live2D model, and the paper doll that stands in for her helpers (<a href="https://huggingface.co/MekaHime/MekaHime_Amika" target="_blank" rel="noopener">MekaHime/MekaHime_Amika</a>, downloaded by <code>scripts/setup_tts.py</code>)</td><td class="own">MekaHime Inc.</td><td>personal / hobbyist use only, 18+: see below</td></tr>
-          <tr><td>Amika's art, design, name and likeness</td><td class="own">© MekaHime Inc.</td><td>character license below</td></tr>
-          <tr><td>Speech recognition (SenseVoiceSmall) and memory embeddings (bge-m3)</td><td class="free">their own</td><td>the weights download separately under their own licenses</td></tr>
-          <tr><td>Live2D Cubism Core (<code>ui/vendor/live2dcubismcore.min.js</code>), which runs every Live2D model</td><td class="own">Live2D Inc.</td><td>Live2D Proprietary Software License Agreement, not MIT</td></tr>
-          <tr><td>Any other Live2D model you add</td><td class="own">its creator's</td><td>bring your own, under its terms</td></tr>
+          <tr><td data-i18n="about.code">OpenAmika: all code in this repository (brain, speech layer, these pages, launcher)</td><td class="free">MIT</td><td data-i18n="about.codeNote">as authorized by MekaHime Inc. (LICENSE; bundled third-party files keep their own, see THIRD_PARTY_NOTICES.md)</td></tr>
+          <tr><td><span data-i18n="about.tts">Text-to-speech: the OpenAmika voice server, a MekaHime build of</span> <a href="https://github.com/RVC-Boss/GPT-SoVITS" target="_blank" rel="noopener">GPT-SoVITS</a> (<code>vendor/tts-engine</code>)</td><td class="free">MIT</td><td data-i18n="about.ttsNote">upstream GPT-SoVITS is MIT; scripts/setup_tts.py downloads it and public pretrained models under their own licenses</td></tr>
+          <tr><td><span data-i18n="about.assets">Amika's voice model, fine-tuned weights, reference audio and Live2D model, and the paper doll that stands in for her helpers</span> (<a href="https://huggingface.co/MekaHime/MekaHime_Amika" target="_blank" rel="noopener">MekaHime/MekaHime_Amika</a>, <span data-i18n="about.download">downloaded by scripts/setup_tts.py</span>)</td><td class="own">MekaHime Inc.</td><td data-i18n="about.personal">personal / hobbyist use only, 18+: see below</td></tr>
+          <tr><td data-i18n="about.art">Amika's art, design, name and likeness</td><td class="own">© MekaHime Inc.</td><td data-i18n="about.characterBelow">character license below</td></tr>
+          <tr><td data-i18n="about.recognition">Speech recognition (SenseVoiceSmall) and memory embeddings (bge-m3)</td><td class="free" data-i18n="about.own">their own</td><td data-i18n="about.weights">the weights download separately under their own licenses</td></tr>
+          <tr><td data-i18n="about.core">Live2D Cubism Core (ui/vendor/live2dcubismcore.min.js), which runs every Live2D model</td><td class="own">Live2D Inc.</td><td data-i18n="about.coreNote">Live2D Proprietary Software License Agreement, not MIT</td></tr>
+          <tr><td data-i18n="about.other">Any other Live2D model you add</td><td class="own" data-i18n="about.creator">its creator's</td><td data-i18n="about.otherNote">bring your own, under its terms</td></tr>
         </tbody>
       </table></div>
 
-      <h4>Model weights and voice assets</h4>
-      <p>MekaHime Inc. <b>owns</b> Amika's voice model, its fine-tuned weights, the reference audio that comes with her,
+      <h4 data-i18n="about.assetsHeading">Model weights and voice assets</h4>
+      <p data-i18n="about.assetsTerms">MekaHime Inc. owns Amika's voice model, its fine-tuned weights, the reference audio that comes with her,
         her Live2D model (model, textures, motions and expressions) and the paper doll that stands in for her helpers on
-        her stage (MekaHime's folded-paper shrine doll). They are licensed for <b>personal, hobbyist use
-        only</b>, by people 18 or older. They may <b>not</b> be distilled, used to train or fine-tune other models,
+        her stage (MekaHime's folded-paper shrine doll). They are licensed for personal, hobbyist use
+        only, by people 18 or older. They may not be distilled, used to train or fine-tune other models,
         extracted, re-hosted, resold, or used in any product, service or commercial setting, and the MekaHime wordmark
-        on the model's texture stays where it is. The full terms are the <code>LICENSE</code> of the Hugging Face
-        repository, which <code>setup_tts.py</code> asks you to accept before it downloads them.</p>
+        on the model's texture stays where it is. The full terms are the LICENSE of the Hugging Face
+        repository, which setup_tts.py asks you to accept before it downloads them.</p>
 
-      <h4>MekaHime's art and the character license</h4>
-      <p>MekaHime's art (Amika's design, name and likeness included) is <b>owned and copyrighted by MekaHime Inc.</b>
-        We license it the way Hatsune Miku is licensed: <b>we own the character, you are free to create with her.</b></p>
+      <h4 data-i18n="about.artHeading">MekaHime's art and the character license</h4>
+      <p data-i18n="about.artTerms">MekaHime's art (Amika's design, name and likeness included) is owned and copyrighted by MekaHime Inc.
+        We license it the way Hatsune Miku is licensed: we own the character, you are free to create with her.</p>
       <ul>
-        <li><b>Social media and video:</b> you may commercialize content made with Amika with <b>no monetary ceiling</b>
-          (ads, streams, memberships, sponsorships) as long as <b>MekaHime is credited visibly</b> in the video or in the
+        <li data-i18n="about.social">Social media and video: you may commercialize content made with Amika with no monetary ceiling
+          (ads, streams, memberships, sponsorships) as long as MekaHime is credited visibly in the video or in the
           video description.</li>
-        <li><b>Merchandise:</b> you may make and sell your own Amika merch up to <b>$1,000 USD in total lifetime value</b>,
-          and it must <b>credit MekaHime visibly on the merch</b>. Beyond that you need a commercial license: write to
+        <li><span data-i18n="about.merch">Merchandise: you may make and sell your own Amika merch up to $1,000 USD in total lifetime value,
+          and it must credit MekaHime visibly on the merch. Beyond that you need a commercial license: write to</span>
           <a href="mailto:hi@mekahime.com">hi@mekahime.com</a>.</li>
-        <li>Suggested credit: <code>Amika © MekaHime Inc. — mekahime.com</code></li>
+        <li><span data-i18n="about.credit">Suggested credit:</span> <code>Amika © MekaHime Inc. — mekahime.com</code></li>
       </ul>
-      <p class="card-hint">This page is a summary; the <code>LICENSE</code> files govern. Questions:
+      <p class="card-hint"><span data-i18n="about.summary">This page is a summary; the LICENSE files govern. Questions:</span>
         <a href="mailto:hi@mekahime.com">hi@mekahime.com</a>.</p>
     </section>
 
-    <p class="card-hint about-fine">© 2026 MekaHime Inc. The code licenses cover the code; the character, the voice, the art and the MekaHime name and logo are MekaHime's.</p>
+    <p class="card-hint about-fine" data-i18n="about.fine">© 2026 MekaHime Inc. The code licenses cover the code; the character, the voice, the art and the MekaHime name and logo are MekaHime's.</p>
   </div>
 </main>
 

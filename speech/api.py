@@ -379,6 +379,9 @@ _WORD_RE = re.compile(r"[A-Za-z']+")
 def _is_trivial_utterance(text: str) -> bool:
     if not text:
         return True
+    from po_contract import hangul_count
+    if hangul_count(text):
+        return False
     meaningful = [c for c in text if c.isalnum()]
     if not meaningful:
         return True
@@ -1036,22 +1039,61 @@ async def build_f_messengers_save(request: Request):
                                   base=MESSENGERS_URL)
 
 
+def _korean_readiness_status(state, code):
+    return {"state": state, "code": code, "acoustic_acceptance": "unverified"}
+
+
 @app.get("/api/tts_probe")
 async def tts_probe():
-    """Lightweight reachability check of the configured TTS server (Setup page health)."""
-    info = {"url": TTS_URL, "character": TTS_CHARACTER_ID}
+    """Reachability plus bounded frontend evidence, never acoustic acceptance."""
+    from urllib.parse import urlsplit
+    try:
+        parsed = urlsplit(TTS_URL)
+        host = parsed.hostname or ""
+        if ":" in host:
+            host = f"[{host}]"
+        port = f":{parsed.port}" if parsed.port is not None else ""
+        public_url = f"{parsed.scheme}://{host}{port}" if parsed.scheme in ("http", "https") else ""
+    except ValueError:
+        public_url = ""
+    info = {"url": public_url, "character": TTS_CHARACTER_ID}
     try:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3)) as client:
             async with client.get(TTS_URL.rstrip("/") + "/ping", allow_redirects=False) as response:
-                return {**info, "ok": response.status == 200, "status": response.status}
-    except (aiohttp.ClientError, asyncio.TimeoutError) as error:
-        return {**info, "ok": False, "error": str(error)[:200]}
+                info.update(ok=response.status == 200, status=response.status)
+            info["korean"] = _korean_readiness_status("unknown", "korean_probe_unsupported")
+            if not info["ok"]:
+                info["korean"] = _korean_readiness_status("unavailable", "tts_unavailable")
+                return info
+            try:
+                async with client.get(TTS_URL.rstrip("/") + "/api/korean_readiness",
+                                      allow_redirects=False) as response:
+                    if response.status == 200:
+                        try:
+                            raw = await response.content.readexactly(8193)
+                        except asyncio.IncompleteReadError as exc:
+                            raw = exc.partial
+                        if len(raw) > 8192:
+                            return info
+                        payload = json.loads(raw)
+                        allowed = {"frontend_ready": {"korean_frontend_ready"},
+                                   "unavailable": {"tts_unavailable", "korean_probe_failed", "korean_probe_timeout"},
+                                   "unknown": {"korean_probe_unsupported"}}
+                        if (isinstance(payload, dict) and isinstance(payload.get("state"), str)
+                                and payload.get("code") in allowed.get(payload["state"], set())):
+                            info["korean"] = _korean_readiness_status(payload["state"], payload["code"])
+            except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, TypeError):
+                pass
+            return info
+    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+        return {**info, "ok": False, "error": "TTS server unavailable",
+                "korean": _korean_readiness_status("unavailable", "tts_unavailable")}
 
 
 # ---------------------- one-shot speech: the first-run wizard, name previews ---------------------- #
 _TTS_SAY_EMOTION_DEFAULT = "casual_happy"
 _TTS_SAY_TIMEOUT_S = 25
-_TTS_LANGUAGE_NAMES = {"CHINESE": "Chinese", "JAPANESE": "Japanese", "ENGLISH": "English"}
+_TTS_LANGUAGE_NAMES = {"CHINESE": "Chinese", "JAPANESE": "Japanese", "ENGLISH": "English", "KOREAN": "Korean"}
 
 
 async def _tts_say_once(tts_text: str, language: Optional[str]) -> dict:
@@ -1074,8 +1116,8 @@ async def _tts_say_once(tts_text: str, language: Optional[str]) -> dict:
         if str(data.get("task_id")) == task_id and not done.done():
             done.set_exception(RuntimeError(str(data.get("error") or "TTS error")))
 
-    await sio.connect(TTS_URL, transports=["websocket"])
     try:
+        await sio.connect(TTS_URL, transports=["websocket"])
         payload: dict = {"task_id": task_id, "turn_id": f"say-{task_id[:8]}", "text": tts_text,
                          "character_id": TTS_CHARACTER_ID, "audio_format": TTS_AUDIO_FORMAT}
         if language:
@@ -1400,7 +1442,7 @@ class TTSClient:
         self, task_id: str, tts_turn_id: str, text: str,
         language: Optional[str] = None,
     ) -> bool:
-        """发出 TTS 请求。`language` 为 'Chinese' / 'English' / 'Japanese'；
+        """发出 TTS 请求。`language` 为 'Chinese' / 'English' / 'Japanese' / 'Korean'；
         None / 'MIXED' 时不带，让 TTS 按角色默认走。
         返回是否发送成功。
         """
@@ -1844,6 +1886,7 @@ _vlm_subscribers: list = []            # [(WebSocket, asyncio.Queue)]
 _vision_poll_task = None
 
 _VLM_PROMPT_TEMPLATES = {
+    "KOREAN": '영상 통화 중입니다. 보이는 내용을 간결한 두 문장으로 설명하세요. 서론이나 지시문 반복 없이 설명만 출력하세요. 참고로 방금 이렇게 말했습니다: "{context}"',
     "ENGLISH": ('You are on a video call with someone. Describe what you see in two '
                 'concise sentences. Output only the description itself — no preamble, '
                 'no restating these instructions. For context, you just said: "{context}"'),
@@ -1851,6 +1894,7 @@ _VLM_PROMPT_TEMPLATES = {
     "JAPANESE": 'あなたは誰かとビデオ通話中です。見えているものを簡潔に2文で描写してください。描写だけを出力し、前置きやこの指示の復唱はしないでください。文脈として、あなたは先ほどこう言いました：「{context}」',
 }
 _VISION_SUFFIX_TEMPLATES = {
+    "KOREAN": "（영상 통화에서 보이는 모습: {desc}）",
     "ENGLISH": "（on the video call you can see: {desc}）",
     "CHINESE": "（你在视频中看到：{desc}）",
     "JAPANESE": "（ビデオ通話で見えているのは：{desc}）",
@@ -2738,7 +2782,7 @@ class DialogSession:
         self._protect_inflight: Optional[str] = None
         self._carry_snapshot: Optional[tuple] = None
         # PromptOptimized (CONTRACT §4.5 / §5): the brain's per-turn reply language
-        # ('zh' / 'en' / 'ja' / None) from the begin / surface_done payloads. Used only as the
+        # ('zh' / 'en' / 'ja' / 'ko' / None) from the begin / surface_done payloads. Used only as the
         # tie-break for MIXED / kanji-only TTS sentences and for observe-only [lang] logging.
         self._turn_reply_lang: Optional[str] = None
         self._turn_reply_lang_reason: Optional[str] = None
@@ -3157,6 +3201,7 @@ class DialogSession:
 
     # 按"AI 被打断那一刻正在说的语言"挑占位符；MIXED / 未知都退到中文。
     NOISE_INTERRUPT_PLACEHOLDERS = {
+        "KOREAN": "(잡음 때문에 말이 끊겼어.)",
         "CHINESE":  "（有一些噪音打断你了）",
         "ENGLISH":  "(Some noise interrupted you.)",
         "JAPANESE": "（雑音が入って遮ってしまいました）",
@@ -3167,7 +3212,7 @@ class DialogSession:
     def _maybe_substitute_noise(self, text: str) -> str:
         """打断场景（_my_partial_pending 非空）下，若 text 还是 trivial/乱码，
         替换成噪音占位符告诉 Hane"被打断但没有效内容"。
-        占位符用 _my_partial_lang 区分中/英/日；平时（非打断）这种 text 在
+        占位符用 _my_partial_lang 区分中/英/日/韩；平时（非打断）这种 text 在
         _do_partial / _do_commit 前就过滤掉了，不会走到这里。
         """
         if self._my_partial_pending and _is_trivial_utterance(text):
@@ -3366,7 +3411,7 @@ class DialogSession:
         if not isinstance(data, dict) or "reply_lang" not in data:
             return
         lang = data.get("reply_lang")
-        self._turn_reply_lang = lang if lang in ("zh", "en", "ja") else None
+        self._turn_reply_lang = lang if lang in ("zh", "en", "ja", "ko") else None
         if "reply_lang_reason" in data:
             self._turn_reply_lang_reason = data.get("reply_lang_reason")
 
@@ -3399,14 +3444,14 @@ class DialogSession:
         detected = self._detect_lang(spoken)
         kanji_only = is_kanji_only(spoken)
         expected = self._turn_reply_lang
-        language = {"CHINESE": "Chinese", "JAPANESE": "Japanese", "ENGLISH": "English"}.get(detected)
+        language = {"CHINESE": "Chinese", "JAPANESE": "Japanese", "ENGLISH": "English", "KOREAN": "Korean"}.get(detected)
         if (detected == "MIXED" or kanji_only) and expected in LANG_TO_TTS:
             language = LANG_TO_TTS[expected]
         text40 = " ".join((spoken or "")[:40].split())
         logger.info(f"[lang] expected={expected or 'none'} detected={detected} "
                     f"kanji_only={kanji_only} text={text40}")
         if (expected in LANG_TO_TTS and language and language != LANG_TO_TTS[expected] and not kanji_only
-                and detected in ("CHINESE", "JAPANESE", "ENGLISH") and self._turn_reply_lang_reason != "switch"
+                and detected in ("CHINESE", "JAPANESE", "ENGLISH", "KOREAN") and self._turn_reply_lang_reason != "switch"
                 and len((spoken or "").strip()) >= 12):
             # A whole sentence in another language than the turn's — the one thing her language rule forbids.
             # Short interjections (オッケー) and a kanji-only tie are not flagged. Observe-only: nothing is gated.
@@ -3549,7 +3594,7 @@ class DialogSession:
         # 语言检测也按 spoken 走（替换可能改变脚本，如英文->假名）。
         spoken = apply_wordmap(sentence, "tts")
         tts_text = prefix_emotion(emotion_key, "." + spoken)
-        # 按句检测语言：Chinese / Japanese / English 直接传给 TTS；MIXED 或纯汉字句
+        # 按句检测语言：Chinese / Japanese / English / Korean 直接传给 TTS；MIXED 或纯汉字句
         # 用本轮大脑给的 reply_lang 定（没有 reply_lang 时 MIXED 仍不传，让 TTS 按角色默认走）。
         tts_language = self._tts_language(spoken)
         idx = self._tts_next_idx
@@ -3663,6 +3708,8 @@ class DialogSession:
                     "turn_id": tts_turn_id,
                     "idx": inflight.get("idx"),
                     "error": err,
+                    "code": ("korean_voice_unavailable" if data.get("code") == "korean_voice_unavailable"
+                             else "tts_unavailable"),
                     "kind": inflight.get("kind"),
                     # a failed final surface sentence still closes the surface for the "loading" emote
                     "surface_last": self._surface_last_item(inflight.get("kind")),
@@ -3886,12 +3933,15 @@ class DialogSession:
     def _detect_lang(text: str) -> str:
         """按 CJK / 拉丁字母 / 假名 字符比例粗判句子语言。
         参考 brain/webui.detect_language 的实现。
-        返回 'CHINESE' | 'JAPANESE' | 'ENGLISH' | 'MIXED'
+        返回 'CHINESE' | 'JAPANESE' | 'ENGLISH' | 'KOREAN' | 'MIXED'
         """
         if not text:
             return "CHINESE"
         # 去掉【emotion】前缀；它里面的拉丁字母不该被当成"英文句子"的依据
         text = re.sub(r"^\s*【[^】]*】\s*", "", text)
+        from po_contract import detect_lang, hangul_count
+        if hangul_count(text):
+            return {"zh": "CHINESE", "ja": "JAPANESE", "en": "ENGLISH", "ko": "KOREAN"}.get(detect_lang(text), "MIXED")
         cn = sum(1 for c in text if "\u4e00" <= c <= "\u9fff")
         en = sum(1 for c in text if c.isalpha() and ord(c) < 128)
         jp = sum(

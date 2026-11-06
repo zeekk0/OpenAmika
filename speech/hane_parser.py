@@ -38,6 +38,7 @@ from po_contract import (
     DEFAULT_EMOTION,
     HELP_RE,
     LANG_TAG_RE,
+    LANG_LABELS,
     LITERAL_NL_RE,
     MD_SPAN_RE,
     OPEN_QUOTES,
@@ -67,7 +68,7 @@ _log = logging.getLogger("yumeha")      # api.py's logger
 # ---------------------------------------------------------------- helpers
 # sanitize_speech 的"去引号"那一步（同一组字符）
 _QUOTE_MARK_RE = re.compile(r"[“”\"「」『』]")
-_LANG_WORDS = ("中文", "日本語", "日语", "English", "英文", "英语")
+_LANG_WORDS = tuple(word.casefold() for word in LANG_LABELS)
 _LANG_OPEN = "（("
 _LANG_CLOSE = "）)"
 _STARS = "*＊"
@@ -94,7 +95,7 @@ def _lang_label_undecided(buf: str) -> bool:
         return False
     if LANG_TAG_RE.match(buf) or any(c in s for c in _LANG_CLOSE):
         return False
-    r = s[1:].lstrip()
+    r = s[1:].lstrip().casefold()
     return any(w.startswith(r) or (r.startswith(w) and not r[len(w):].strip()) for w in _LANG_WORDS)
 
 

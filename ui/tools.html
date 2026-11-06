@@ -4,112 +4,115 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#14091a">
-<title>OpenAmika · Tools</title>
+<title data-i18n="tools.title">OpenAmika · Tools</title>
+<script src="/ui/i18n.js"></script>
+<script src="/ui/locales/common.js"></script>
+<script src="/ui/locales/tools.js"></script>
 <link rel="stylesheet" href="/ui/openamika.css">
 </head>
 <body>
 <main class="oa-main">
   <div class="oa-page-head rv" style="--d:0">
-    <h1>Her <em>hands</em></h1>
-    <p class="sub">Give her agents and tools — Hermes Agent, nanoMuse, smart-home control, anything that speaks MCP.
+    <h1 data-i18n="tools.heading">Her hands</h1>
+    <p class="sub" data-i18n="tools.intro">Give her agents and tools — Hermes Agent, nanoMuse, smart-home control, anything that speaks MCP.
     Enable one and she knows she has it. She decides whether to use it; nothing runs until you asked and she agreed.</p>
   </div>
 
-  <div class="oa-eyebrow rv" style="--d:1"><span>How she uses them</span><i>道具</i></div>
+  <div class="oa-eyebrow rv" style="--d:1"><span data-i18n="tools.how">How she uses them</span><i>道具</i></div>
   <section class="tech-card rv" style="--d:2">
     <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap; margin-bottom:14px;">
       <label style="display:inline-flex;align-items:center;gap:10px;font-weight:600;font-size:16px;">
         <span class="switch"><input type="checkbox" id="toolsEnabled"><span class="track"></span></span>
-        Tools enabled
+<span data-i18n="tools.enabled">Tools enabled</span>
       </label>
-      <span class="card-hint">She speaks first, as always. After she has answered, a small metered clerk call reads what you asked and what she
+      <span class="card-hint" data-i18n="tools.clerkHelp">She speaks first, as always. After she has answered, a small metered clerk call reads what you asked and what she
       said out loud, and hands over only what she agreed to — quoting your own words as proof. She can refuse. She can't start anything on her own.</span>
     </div>
     <div class="form-row" data-pro>
-      <div class="field" style="max-width:200px;"><label>Clerk runs on</label>
+      <div class="field" style="max-width:200px;"><label data-i18n="tools.clerk">Clerk runs on</label>
         <select id="clerkRole">
-          <option value="surface">surface model (cheap, default)</option>
-          <option value="deep">deep model</option>
-          <option value="reflection">reflection model</option>
-          <option value="memory_write">memory writer model</option>
+          <option value="surface" data-i18n="tools.surface">surface model (cheap, default)</option>
+          <option value="deep" data-i18n="tools.deep">deep model</option>
+          <option value="reflection" data-i18n="tools.reflection">reflection model</option>
+          <option value="memory_write" data-i18n="tools.memory">memory writer model</option>
         </select>
       </div>
-      <div class="field"><label>Max calls / turn</label><input type="number" id="limCalls" min="1" max="10" step="1"></div>
-      <div class="field"><label>Call timeout (s)</label><input type="number" id="limTimeout" min="3" max="120" step="1"></div>
-      <div class="field"><label>Job poll (s)</label><input type="number" id="limPoll" min="1" max="30" step="0.5"></div>
+      <div class="field"><label data-i18n="tools.calls">Max calls / turn</label><input type="number" id="limCalls" min="1" max="10" step="1"></div>
+      <div class="field"><label data-i18n="tools.timeout">Call timeout (s)</label><input type="number" id="limTimeout" min="3" max="120" step="1"></div>
+      <div class="field"><label data-i18n="tools.poll">Job poll (s)</label><input type="number" id="limPoll" min="1" max="30" step="0.5"></div>
     </div>
     <div style="display:flex; gap:12px; margin-top:14px; align-items:center; flex-wrap:wrap;">
-      <button class="btn primary" id="toolsSave">Save tool settings</button>
-      <span class="card-hint">Agents report back through her: progress, questions, approval requests, the final result. An agent's approval
+      <button class="btn primary" id="toolsSave" data-i18n="tools.saveSettings">Save tool settings</button>
+      <span class="card-hint" data-i18n="tools.approvalHelp">Agents report back through her: progress, questions, approval requests, the final result. An agent's approval
       is released only by your yes in conversation or a click on the Use page — never by her.</span>
     </div>
   </section>
 
   <!-- smart home: the iot server card (rendered by tools.js into #iotServer) and the plugs by hand, for everyone -->
-  <div class="oa-eyebrow rv" style="--d:3"><span>Smart Home and IoT</span><i>家</i></div>
+  <div class="oa-eyebrow rv" style="--d:3"><span data-i18n="tools.home">Smart Home and IoT</span><i>家</i></div>
   <section class="tech-card rv" style="--d:4" id="iotCard">
-    <h3><span class="dot" id="iotDot"></span> Smart Home and IoT <span class="tool-sub" id="iotSub">checking…</span></h3>
+    <h3><span class="dot" id="iotDot"></span> <span data-i18n="tools.home">Smart Home and IoT</span> <span class="tool-sub" id="iotSub">checking…</span></h3>
     <!-- IoT turns on only after the IoT safety statement (docs/IOT_DISCLAIMER.md) was read and accepted: tools.js -->
     <div class="iot-safety" id="iotSafety">
-      <p><b>Safety first.</b> Amika is an AI: she can mishear, misunderstand, or switch the wrong device at the wrong
+      <p data-i18n="tools.safety">Safety first. Amika is an AI: she can mishear, misunderstand, or switch the wrong device at the wrong
       time, and nothing guarantees that she will not cause harm. Everything you connect is at your own risk. Connect
       only things that are harmless if switched by mistake: never heaters, cooking appliances, locks, valves, alarms,
       medical equipment or anything else that could cause danger.</p>
       <div class="iot-safety-row">
         <span id="iotConsentState">Turning IoT on shows the IoT safety statement first; IoT stays off unless you accept it.</span>
-        <button class="btn small" id="iotConsentOpen" type="button">Read the IoT safety statement</button>
+        <button class="btn small" id="iotConsentOpen" data-i18n="tools.readStatement" type="button">Read the IoT safety statement</button>
       </div>
     </div>
     <div id="iotServer"></div>
     <div class="card-hint" id="iotHint" hidden></div>
     <div class="iot-grid" id="iotDevices"></div>
     <div class="iot-pairing">
-      <button class="btn small" id="iotPairBtn" type="button">Find new devices</button>
-      <button class="btn small danger" id="iotPairStop" type="button" hidden>Stop</button>
+      <button class="btn small" id="iotPairBtn" data-i18n="tools.find" type="button">Find new devices</button>
+      <button class="btn small danger" id="iotPairStop" data-i18n="tools.stop" type="button" hidden>Stop</button>
       <span class="card-hint" id="iotPairNote">Put a new plug into pairing mode, then press Find.</span>
     </div>
     <div class="iot-events mono" id="iotEvents"></div>
   </section>
 
-  <div class="oa-eyebrow rv" style="--d:7"><span>Agents &amp; MCP servers</span><i>接続</i></div>
+  <div class="oa-eyebrow rv" style="--d:7"><span data-i18n="tools.servers">Agents &amp; MCP servers</span><i>接続</i></div>
   <div id="serversBox" class="rv" style="--d:8"></div>
 
   <section class="tech-card rv" style="--d:9" data-pro>
-    <h3>Add a server</h3>
+    <h3 data-i18n="tools.addServer">Add a server</h3>
     <div class="form-row">
-      <div class="field" style="max-width:160px;"><label>Name</label><input type="text" id="addName" placeholder="hermes" maxlength="32"></div>
-      <div class="field" style="max-width:150px;"><label>Transport</label>
-        <select id="addTransport"><option value="stdio">stdio (local)</option><option value="http">http (remote)</option></select></div>
+      <div class="field" style="max-width:160px;"><label data-i18n="tools.name">Name</label><input type="text" id="addName" placeholder="hermes" maxlength="32"></div>
+      <div class="field" style="max-width:150px;"><label data-i18n="tools.transport">Transport</label>
+        <select id="addTransport"><option value="stdio" data-i18n="tools.stdio">stdio (local)</option><option value="http" data-i18n="tools.http">http (remote)</option></select></div>
       <div class="field" style="flex:2;"><label id="addTargetLabel">Command + args (first word = command)</label>
         <input type="text" id="addTarget" class="mono" placeholder="python -m openamika_agents hermes"></div>
-      <button class="btn small" id="addBtn">Add</button>
+      <button class="btn small" id="addBtn" data-i18n="tools.add">Add</button>
     </div>
-    <p class="card-hint" style="margin-top:10px;">
-      Recipes — <b>Hermes Agent</b>: <code>python -m openamika_agents hermes</code> (needs <code>hermes gateway</code> with its API server on; put
-      <code>HERMES_API_KEY</code> in the entry's env, see <code>servers/openamika-agents/README.md</code>) ·
-      <b>nanoMuse</b>: <code>python -m openamika_agents nanomuse</code> (needs <code>nanomuse serve</code>; <code>NANOMUSE_TOKEN_FILE</code> in env) ·
-      <b>Smart home</b>: <code>python -m openamika_iot</code> (cwd <code>../servers/openamika-iot</code>) ·
-      <b>Home Assistant</b>: http → <code>http://homeassistant.local:8123/mcp_server/sse</code> + bearer header · any other MCP server works the same way.
-      Smart-home servers (this one, Home Assistant, or any entry with <code>"kind": "iot"</code>) turn on only after you accept the IoT safety statement.
+    <p class="card-hint" style="margin-top:10px;" data-i18n="tools.recipes">
+      Recipes — Hermes Agent: python -m openamika_agents hermes (needs hermes gateway with its API server on; put
+      HERMES_API_KEY in the entry's env, see servers/openamika-agents/README.md) ·
+      nanoMuse: python -m openamika_agents nanomuse (needs nanomuse serve; NANOMUSE_TOKEN_FILE in env) ·
+      Smart home: python -m openamika_iot (cwd ../servers/openamika-iot) ·
+      Home Assistant: http → http://homeassistant.local:8123/mcp_server/sse + bearer header · any other MCP server works the same way.
+      Smart-home servers (this one, Home Assistant, or any entry with "kind": "iot") turn on only after you accept the IoT safety statement.
     </p>
     <details class="oa-details" data-pro>
-      <summary>Raw config (tools.json)</summary>
+      <summary data-i18n="tools.raw">Raw config (tools.json)</summary>
       <div class="inner">
         <textarea id="rawConfig" class="mono" rows="14" spellcheck="false"></textarea>
         <div style="display:flex; gap:12px; margin-top:10px;">
-          <button class="btn small" id="rawSave">Save raw config</button>
-          <span class="card-hint">Full document — env vars, headers, cwd live here.</span>
+          <button class="btn small" id="rawSave" data-i18n="tools.rawSave">Save raw config</button>
+          <span class="card-hint" data-i18n="tools.rawHelp">Full document — env vars, headers, cwd live here.</span>
         </div>
       </div>
     </details>
   </section>
 
-  <div class="oa-eyebrow rv" style="--d:10" data-pro><span>Call log</span><i>記録</i></div>
+  <div class="oa-eyebrow rv" style="--d:10" data-pro><span data-i18n="tools.log">Call log</span><i>記録</i></div>
   <section class="tech-card rv" style="--d:11" data-pro>
     <div class="table-scroll">
       <table class="oa-table"><thead><tr>
-        <th>When</th><th>Tool</th><th>Arguments</th><th>Outcome</th><th>Result</th>
-      </tr></thead><tbody id="logBody"><tr><td colspan="5" class="card-hint">No tool calls yet.</td></tr></tbody></table>
+        <th data-i18n="tools.when">When</th><th data-i18n="tools.tool">Tool</th><th data-i18n="tools.args">Arguments</th><th data-i18n="tools.outcome">Outcome</th><th data-i18n="tools.result">Result</th>
+      </tr></thead><tbody id="logBody"><tr><td colspan="5" class="card-hint" data-i18n="tools.noCalls">No tool calls yet.</td></tr></tbody></table>
     </div>
   </section>
 </main>
@@ -118,25 +121,26 @@
      turned on, and again whenever its version changes; IoT turns on only after the box is ticked and Enable IoT pressed. -->
 <dialog class="oa-consent" id="iotConsent" aria-labelledby="iotConsentTitle" aria-describedby="iotConsentLead">
   <div class="oa-consent-head">
-    <h2 id="iotConsentTitle">IoT safety and responsibility statement</h2>
+    <h2 id="iotConsentTitle" data-i18n="tools.statementTitle">IoT safety and responsibility statement</h2>
     <p class="oa-consent-meta"><span id="iotConsentVersion">Version …</span> · MekaHime Inc.</p>
   </div>
   <p class="oa-consent-lead" id="iotConsentLead">Before Amika can reach anything in your home, read this statement in
   full. IoT stays off unless you accept it.</p>
   <p class="oa-consent-changed" id="iotConsentChanged" hidden></p>
-  <div class="oa-consent-langs" role="group" aria-label="Language of the statement">
+  <div class="oa-consent-langs" role="group" aria-label="Language of the statement" data-i18n-aria-label="tools.statementLanguage">
     <button type="button" class="oa-consent-lang" data-lang="en" aria-pressed="true">English</button>
     <button type="button" class="oa-consent-lang" data-lang="ja" lang="ja" aria-pressed="false">日本語</button>
     <button type="button" class="oa-consent-lang" data-lang="zh" lang="zh-CN" aria-pressed="false">简体中文</button>
+    <button type="button" class="oa-consent-lang" data-lang="ko" lang="ko" aria-pressed="false">한국어</button>
     <a class="oa-consent-doc" href="https://github.com/zeekk0/OpenAmika/blob/main/docs/IOT_DISCLAIMER.md" target="_blank"
        rel="noopener">docs/IOT_DISCLAIMER.md</a>
   </div>
-  <div class="oa-consent-text" id="iotConsentText" tabindex="0" role="region" aria-label="The statement"></div>
-  <label class="oa-consent-check" id="iotConsentAccept"><input type="checkbox" id="iotConsentCheck"> I have read and accept this</label>
+  <div class="oa-consent-text" id="iotConsentText" tabindex="0" role="region" aria-label="The statement" data-i18n-aria-label="tools.statementRegion"></div>
+  <label class="oa-consent-check" id="iotConsentAccept"><input type="checkbox" id="iotConsentCheck"> <span data-i18n="tools.accept">I have read and accept this</span></label>
   <p class="oa-consent-error" id="iotConsentError" role="alert" hidden></p>
   <div class="oa-consent-actions">
     <button type="button" class="btn" id="iotConsentCancel">Cancel</button>
-    <button type="button" class="btn primary" id="iotConsentEnable" disabled>Enable IoT</button>
+    <button type="button" class="btn primary" id="iotConsentEnable" data-i18n="tools.enableIot" disabled>Enable IoT</button>
   </div>
 </dialog>
 

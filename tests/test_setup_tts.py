@@ -580,3 +580,61 @@ def test_the_license_question_counts_the_doll_only_when_it_can_come(hub, monkeyp
     rc, rows, _ = run(hub)
     assert asked == [1] and rc == 1 and "license was not accepted" in rows[PAPER_DOLL][1]   # declined: not downloaded
     assert rows[VOICE][0] == "OK" and not hub.doll.exists()
+
+
+def test_generic_import_probe_never_imports_korean():
+    assert '"g2pk2"' not in st.IMPORT_PROBE
+
+
+@pytest.mark.parametrize("outcome", ["success", "missing", "timeout", "invalid", "crash"])
+def test_korean_probe_voice_interpreter_bounded_optional(tmp_path, monkeypatch, outcome):
+    import subprocess
+    from types import SimpleNamespace
+    vpy = st.venv_python(tmp_path)
+    vpy.parent.mkdir(parents=True)
+    vpy.touch()
+    calls = []
+
+    def run(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+        if outcome == "timeout":
+            raise subprocess.TimeoutExpired(cmd, kwargs["timeout"])
+        result = {"ok": outcome == "success", "detail": "missing eunjeon"}
+        return SimpleNamespace(returncode=1 if outcome == "crash" else 0,
+                               stdout="garbage" if outcome == "invalid" else json.dumps(result), stderr="")
+
+    monkeypatch.setattr(st.subprocess, "run", run)
+    st.ROWS.clear()
+    result = st.verify_korean_voice(tmp_path)
+    assert result["ok"] is (outcome == "success")
+    cmd, kwargs = calls[0]
+    assert cmd[0] == str(vpy)
+    assert "-I" in cmd and "-B" in cmd
+    assert 0 < kwargs["timeout"] <= 30
+    assert kwargs["cwd"] == str(tmp_path)
+    assert len(calls) == 1
+    assert st.ROWS[-1][1] == "Korean voice"
+    assert st.ROWS[-1][0].strip() == ("OK" if outcome == "success" else "--")
+    if outcome != "success":
+        assert "text" in st.ROWS[-1][2] and "voice environment" in st.ROWS[-1][2]
+
+
+def test_korean_missing_voice_env_does_not_use_host(tmp_path, monkeypatch):
+    monkeypatch.setattr(st.subprocess, "run", lambda *a, **k: pytest.fail("used host interpreter"))
+    assert not st.verify_korean_voice(tmp_path)["ok"]
+
+
+def test_verify_routes_korean_check_without_install(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(st, "verify_engine", lambda *a: None)
+    monkeypatch.setattr(st, "check_launcher", lambda *a: None)
+    monkeypatch.setattr(st, "verify_korean_voice", lambda engine: calls.append(engine))
+    monkeypatch.setattr(st, "ask_voice_license", lambda: pytest.fail("license prompt in verify"))
+    monkeypatch.setattr(st, "ensure_venv", lambda *a: pytest.fail("installation in verify"))
+    rc = st.main(["--verify", "--engine-dir", str(tmp_path), "--skip-voice", "--skip-avatar", "--skip-paper-doll"])
+    assert rc == 0 and calls == [tmp_path]
+
+
+def test_custom_engine_copy_includes_korean_probe(tmp_path):
+    st.sync_engine_files(tmp_path)
+    assert (tmp_path / "korean_voice_probe.py").read_bytes() == (ROOT / "scripts" / "korean_voice_probe.py").read_bytes()

@@ -10,7 +10,7 @@ Amika is a Live2D anime girl who talks with you by voice and text in real time, 
 in your city. She runs on your own PC, with OpenRouter or fully local with Ollama. A hosted version runs at
 [mekahime.com/amika](https://www.mekahime.com/amika).
 
-[简体中文](README.zh-CN.md) | [日本語](README.ja.md) | **English**
+[简体中文](README.zh-CN.md) | [日本語](README.ja.md) | **English** | [한국어](README.ko.md)
 
 [![Made with Love](https://img.shields.io/badge/Made%20with-Love-ff69b4)](https://www.mekahime.com/openamika)
 [![GitHub](https://img.shields.io/badge/GitHub-zeekk0%2FOpenAmika-181717?logo=github)](https://github.com/zeekk0/OpenAmika)
@@ -87,6 +87,11 @@ and `OK Live2D model Amika`, she has her voice and her body; `OK paper doll Host
 ([Her helpers](#her-helpers-hermes-and-nanomuse)).
 
 ## Talk to her
+
+Korean conversation routing is available alongside English, Japanese and Chinese. Say `한국어로 말해 줘` or
+`Please reply in Korean` for a one-turn language request. Use a model that understands Korean and the Chinese
+internal prompts. Select Korean in the language menu for localized pages and onboarding. Korean voice remains
+experimental pending supported-hardware pronunciation checks. See the [Korean quick start](README.ko.md) and [voice status](docs/TTS.md#korean-voice-status).
 
 Double-click `Start_OpenAmika.bat` in the OpenAmika folder (in PowerShell: `.\Start_OpenAmika.bat`). One console
 starts all of her, and your browser opens **http://localhost:53000** when she is ready: about a minute, a few more

@@ -961,7 +961,10 @@ _LANG_NAMES = {"en": "英文", "zh": "中文", "ja": "日文", "ko": "韩文"}
 def _lang_label(reply_lang, user_text: str) -> str:
     code = str(reply_lang or "").lower()[:2]
     if code not in _LANG_NAMES:
-        if re.search(r"[぀-ヿ]", user_text or ""):
+        from po_contract import detect_lang, hangul_count
+        if hangul_count(user_text or ""):
+            code = detect_lang(user_text or "") or code
+        elif re.search(r"[぀-ヿ]", user_text or ""):
             code = "ja"
         elif re.search(r"[一-鿿]", user_text or ""):
             code = "zh"
@@ -999,7 +1002,7 @@ def _register_job(server: str, task: str, turn_id: str, doc: dict, reply_lang=No
               "relayed": set(), "started": time.time(), "updated": time.time(),
               "result": doc.get("result"), "error": doc.get("error"), "turn_id": turn_id,
               "source_turn": source_turn or turn_id,       # the user turn whose words authorised it
-              "reply_lang": reply_lang if reply_lang in ("zh", "en", "ja") else None}
+              "reply_lang": reply_lang if reply_lang in _LANG_NAMES else None}
     _JOBS[record["key"]] = record
     if asked is not None:
         asked["job"] = job_id
@@ -1211,7 +1214,7 @@ def run_clerk(turn_id: str, user_text: str, spoken: str, thought: str = "", repl
             arguments = {"job": job["job"], "text": text_answer or ""}
             if pending.get("kind") == "approval":
                 arguments.update({"approval_id": str(pending.get("id") or ""), "approved": bool(approved)})
-            if reply_lang in ("zh", "en", "ja"):
+            if reply_lang in _LANG_NAMES:
                 job["reply_lang"] = reply_lang      # the follow-up's language wins for the next relay
             _job_control(job, "answer", arguments, turn_id, quote=item.get("quote"))
             outcome["answers"] += 1

@@ -18,7 +18,7 @@
   --ok: #43b581;
   --warn: #e8c547;
   --err: #e05656;
-  --font-body: "Rajdhani", system-ui, sans-serif;
+  --font-body: "Rajdhani", system-ui, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
   --font-character: "Fraunces", Georgia, serif;
   --font-jp: "Noto Serif JP", serif;
   --ease: cubic-bezier(.2, .8, .2, 1);
@@ -41,6 +41,26 @@
 html, body { margin: 0; padding: 0; }
 
 html { background: var(--bg); }
+html:lang(ko) {
+  --font-body: system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+html:lang(ko) h1, html:lang(ko) h2, html:lang(ko) h3, html:lang(ko) h4 { line-height: 1.35; }
+html:lang(ko) .oa-nav-links a, html:lang(ko) .oa-health { letter-spacing: normal; }
+.oa-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+.oa-language { margin-right: 10px; }
+.oa-language select {
+  min-height: 36px; max-width: 140px; padding: 5px 8px;
+  color: var(--pearl); background: var(--panel); border: 1px solid var(--line-strong);
+  border-radius: 8px; font: inherit; cursor: pointer;
+}
+.oa-language select:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
+.oa-health-pop .row { overflow-wrap: anywhere; }
+@media (max-width: 1000px) {
+  html .oa-nav { height: auto; min-height: var(--nav-h); flex-wrap: wrap; gap: 10px; padding: 10px 14px; }
+  .oa-nav > div:last-child { flex-wrap: wrap; gap: 6px; }
+}
 body {
   background:
     radial-gradient(ellipse 90% 55% at 50% 0%, rgba(216, 180, 226, .08) 0%, transparent 70%),
@@ -462,7 +482,7 @@ select option, select optgroup { background: #241627; color: var(--pearl); }
 }
 
 /* ───────────────────────── Use page ───────────────────────── */
-.use-layout { display: grid; gap: 16px; align-items: start; }
+.use-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
 @media (min-width: 1020px) { .use-layout { grid-template-columns: minmax(0, 1.08fr) minmax(0, .92fr); } }
 
 .stage-card { padding: 0; overflow: hidden; min-height: 420px; }

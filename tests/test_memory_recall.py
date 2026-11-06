@@ -4,6 +4,7 @@ import random
 import sys
 import tempfile
 import unittest
+import unicodedata
 from pathlib import Path
 from unittest.mock import patch
 
@@ -11,7 +12,7 @@ PAYLOAD = Path(__file__).resolve().parents[1] / "brain"
 if str(PAYLOAD) not in sys.path:
     sys.path.insert(0, str(PAYLOAD))
 import methods
-from f_memory import DIMENSIONS
+from f_memory import DIMENSIONS, MemoryRuntime
 from f_method import CandidateF
 
 
@@ -117,6 +118,46 @@ class RecallTests(unittest.TestCase):
             self.assertEqual(reloaded._vector_index.count, 80)
             methods.NUMPY_RECALL = True
             self.assertEqual(model.retrieve(query, **KW)["source_ids"], reloaded.retrieve(query, **KW)["source_ids"])
+
+    def test_korean_decomposed_lookup_tokens_match_without_rewriting_evidence(self):
+        original = "민수는 부산에서 살아요."
+        decomposed = unicodedata.normalize("NFD", original)
+        self.assertEqual(methods.tokenize(decomposed), methods.tokenize(original))
+        source = dict(event(0), user=decomposed)
+        model = CandidateF([source], {"facts": []}, {"documents": {}, "queries": {}})
+        result = model.retrieve("부산", **KW)
+        self.assertIn(source["id"], result["source_ids"])
+        self.assertEqual(model.events[0]["user"], decomposed)
+
+    def test_korean_fact_correction_round_trip_keeps_exact_quotes(self):
+        originals = ["나는 부산에 살고 있어.", "정정할게. 지금은 부산이 아니라 서울에 살고 있어."]
+
+        def extract(events, chunk_id):
+            source = events[0]
+            corrected = source["user"] == originals[1]
+            city = "서울" if corrected else "부산"
+            return [{"id": "fact-" + source["id"], "text": "사용자는 " + city + "에 산다.",
+                     "subject": "user", "predicate": "lives_in", "value": city,
+                     "source_ids": [source["id"]], "date": source["time"][:10],
+                     "source_kind": "user", "fact_type": "user_fact", "status": "active",
+                     "entities": [city], "supersedes": [], "replaces_prior": corrected,
+                     "quotes": [{"source_id": source["id"], "speaker": "user", "quote": source["user"]}]}]
+
+        def embed(texts, task_type):
+            return [[1.0] + [0.0] * (DIMENSIONS - 1) for text in texts]
+
+        with tempfile.TemporaryDirectory() as folder:
+            memory = MemoryRuntime(folder, extract, embed)
+            for i, original in enumerate(originals):
+                source = dict(event(i), user=original, assistant="알겠어.")
+                memory.archive(source)
+                self.assertEqual(memory.flush_pending()["completed"], 1)
+            reloaded = MemoryRuntime(folder, extract, embed)
+            result = reloaded.retrieve("부산에서 어디로 이사했어?")
+            self.assertEqual(result["diagnostics"]["correction_links"], 1)
+            for original in originals:
+                self.assertIn(original, result["text"])
+            self.assertEqual([e["user"] for e in reloaded.model.events], originals)
 
 
 if __name__ == "__main__":

@@ -1564,7 +1564,7 @@ IMPORT_PROBE = r"""
 import json, importlib, sys
 mods = ["torch", "torchaudio", "transformers", "onnxruntime", "pyopenjtalk", "nltk", "jieba", "opencc", "g2p_en",
         "pypinyin", "cn2an", "librosa", "soundfile", "pytorch_lightning", "peft", "socketio", "aiohttp", "split_lang",
-        "fast_langdetect", "x_transformers", "matplotlib", "resampy", "ffmpeg", "ToJyutping", "g2pk2"]
+        "fast_langdetect", "x_transformers", "matplotlib", "resampy", "ffmpeg", "ToJyutping"]
 out, bad, dists = {}, {}, {}
 for m in mods:
     try:
@@ -1598,7 +1598,7 @@ def verify_imports(vpy: Path) -> dict:
         res = json.loads(p.stdout.strip().splitlines()[-1])
     except (ValueError, IndexError):
         raise SetupError(f"import check failed:\n{p.stderr[-1500:]}")
-    bad = {k: v for k, v in res["bad"].items() if k not in ("g2pk2",)}   # Korean is optional
+    bad = res["bad"]   # Korean is checked separately, without entering its auto-download import path.
     if bad:
         detail = "; ".join(f"{k}: {v}" for k, v in bad.items())
         hint = too_long_hint(detail)
@@ -1618,6 +1618,34 @@ def verify_imports(vpy: Path) -> dict:
         gpu = f"CUDA OK on {ok['gpu']}" if ok.get("cuda") else "no CUDA (CPU)"
         row("OK ", "imports", f"{len(ok) - 2} packages import; torch {ok.get('torch')}; {gpu}")
     return res
+
+
+def verify_korean_voice(engine: Path) -> dict:
+    """Optional, read-only check. Only the voice interpreter may import its frontend."""
+    vpy = venv_python(engine)
+    result = {"ok": False, "detail": f"voice interpreter missing: {vpy}"}
+    if vpy.is_file():
+        try:
+            p = subprocess.run(
+                [str(vpy), "-I", "-B", str(Path(__file__).with_name("korean_voice_probe.py")), str(engine)],
+                cwd=str(engine), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
+            )
+            if p.returncode != 0:
+                raise ValueError(f"probe exited {p.returncode}")
+            result = json.loads(p.stdout.strip().splitlines()[-1])
+            if not isinstance(result, dict) or type(result.get("ok")) is not bool or not isinstance(result.get("detail"), str):
+                raise ValueError("invalid probe result")
+        except subprocess.TimeoutExpired:
+            result = {"ok": False, "detail": "Korean G2P check timed out after 30 seconds"}
+        except (OSError, ValueError, IndexError) as exc:
+            result = {"ok": False, "detail": f"Korean G2P check failed: {exc}"}
+    detail = result["detail"]
+    if not result["ok"]:
+        detail = (f"unavailable: {detail}. Korean text and other-language readiness are unchanged. "
+                  f"Provision the missing Korean packages/data explicitly in the voice environment ({vpy}), "
+                  "then rerun --verify. Verification never installs or downloads them.")
+    row("OK " if result["ok"] else "-- ", "Korean voice", detail)
+    return result
 
 
 SELF_TEST = r"""
@@ -1684,6 +1712,11 @@ def sync_engine_files(engine: Path) -> None:
         if src.is_file() and (not (engine / name).is_file() or (engine / name).read_bytes() != src.read_bytes()):
             shutil.copy2(src, engine / name)
             log(f"copied {name} -> {engine}")
+    # A custom engine directory cannot find the repository's scripts/ sibling.
+    helper = Path(__file__).with_name("korean_voice_probe.py")
+    dest = engine / helper.name
+    if not dest.is_file() or dest.read_bytes() != helper.read_bytes():
+        shutil.copy2(helper, dest)
 
 
 def long_paths_enabled() -> bool:
@@ -1950,6 +1983,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             pass
         elif args.verify:
             steps.run("voice server", verify_engine, engine, ver)
+            verify_korean_voice(engine)
             check_launcher(engine)
         else:
             device = pick_device(args)
@@ -1969,6 +2003,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             else:
                 optional_ffmpeg(engine, ver, args.keep_downloads)
             probe = steps.run("imports", verify_imports, vpy, needs=("venv", "torch", "packages"))
+            verify_korean_voice(engine)
             steps.run("Japanese dictionary", ensure_ja_dict, vpy, gsv, needs=("venv", "packages", "GPT-SoVITS"))
             if vpy is not None:
                 steps.run("install record", write_install_json, engine, vpy, device, probe or {}, args)

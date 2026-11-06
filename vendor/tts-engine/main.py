@@ -364,6 +364,47 @@ def run_language(lang: str, text: str) -> str:
     return "auto" if lang == "en" and NON_LATIN_RE.search(text) else lang
 
 
+_KOREAN_VERIFIED: set[Path] = set()
+
+
+class KoreanVoiceUnavailable(RuntimeError):
+    code = "korean_voice_unavailable"
+
+
+def require_korean_voice(gsv_dir: Path) -> None:
+    """Check in a disposable child, never install a process-wide guard in the server.
+
+    The pinned cleaner imports text.korean lazily on a Korean request. Its G2p
+    constructor can install Mecab, so reject missing prerequisites before that
+    import. Successful checks are cached per checkout for this process. Restart
+    after changing voice dependencies/data; failures are retried on the next request.
+    """
+    try:
+        gsv_dir = gsv_dir.resolve()
+        if gsv_dir in _KOREAN_VERIFIED:
+            return
+        helper = ENGINE_DIR / "korean_voice_probe.py"
+        if not helper.is_file():
+            helper = Path(__file__).resolve().parent.parent.parent / "scripts" / "korean_voice_probe.py"
+        if not helper.is_file():
+            raise RuntimeError("verification helper missing; rerun scripts/setup_tts.py")
+        p = subprocess.run(
+            [sys.executable, "-I", "-B", str(helper), str(ENGINE_DIR), str(gsv_dir)],
+            cwd=str(gsv_dir), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
+        )
+        if p.returncode:
+            raise RuntimeError(f"verification child exited {p.returncode}")
+        result = json.loads(p.stdout.strip().splitlines()[-1])
+        if not isinstance(result, dict) or result.get("ok") is not True:
+            raise RuntimeError(result.get("detail", "invalid probe result") if isinstance(result, dict)
+                               else "invalid probe result")
+        _KOREAN_VERIFIED.add(gsv_dir)
+    except (OSError, ValueError, IndexError, RuntimeError, subprocess.TimeoutExpired) as exc:
+        raise KoreanVoiceUnavailable(f"Korean voice unavailable: {exc}. Korean text remains available. "
+                           "Provision Korean dependencies explicitly in the voice environment, then run "
+                           "scripts/setup_tts.py --verify; this request installs nothing.") from exc
+
+
 def split_tagged(text: str) -> list[Segment]:
     """``【a】x 【b】y`` -> [Segment(a, x), Segment(b, y)]; text before the first tag has tag None."""
     segs: list[Segment] = []
@@ -1180,6 +1221,13 @@ class VoiceEngine:
 
         Returns {sr, pcm (int16 ndarray), tag, fallback, lang, synth_s, stages, retried, warning}."""
         assert self.tts is not None and self.speaker is not None
+        lang = run_language(lang, text)
+        # No Korean warm-up/startup dependency. Auto modes may choose Korean for
+        # Hangul, including English requests promoted to auto by run_language.
+        if (lang in ("ko", "all_ko") or self.speaker.prompt_lang in ("ko", "all_ko") or
+                (lang in ("auto", "auto_yue") and re.search(
+                    "[\u1100-\u11ff\u3130-\u318f\ua960-\ua97f\uac00-\ud7ff\uffa0-\uffdc]", text))):
+            require_korean_voice(self.args.gpt_sovits_dir.resolve())
         opts = opts or {}
         emo, fell_back = self.speaker.resolve(tag)
         ref_path, prompt_text = self._reference(emo)
@@ -1191,7 +1239,6 @@ class VoiceEngine:
             issues.append(f"speed {speed:g} needs ffmpeg with this GPT-SoVITS version and none was found; "
                           "spoke at speed 1.0")
             speed = 1.0
-        lang = run_language(lang, text)
         by_sentence = a.text_split == "sentence"
         parts = fragments(text) if by_sentence else [text]
         said = [lead_pause(p) for p in parts] if by_sentence else parts
@@ -1394,6 +1441,69 @@ def parse_job(data: Any) -> Job:
 
 
 class Server:
+    async def korean_readiness(self) -> dict:
+        """Read-only, coalesced G2P evidence. Never load a model or synthesize audio."""
+        def status(state, code):
+            return {"state": state, "code": code, "acoustic_acceptance": "unverified"}
+
+        if self.engine.state != "ready":
+            return status("unavailable", "tts_unavailable")
+        key = str(self.args.gpt_sovits_dir.resolve())
+        cached = getattr(self, "_korean_cache", None)
+        if cached and cached[0] == key and time.monotonic() - cached[1] < 30:
+            return dict(cached[2])
+        task = getattr(self, "_korean_probe_task", None)
+        if task is not None and not task.done() and getattr(self, "_korean_probe_key", None) != key:
+            return status("unavailable", "tts_unavailable")
+        if task is None or task.done():
+            async def check():
+                result = status("unavailable", "korean_probe_failed")
+                process = None
+                try:
+                    helper = ENGINE_DIR / "korean_voice_probe.py"
+                    if not helper.is_file():
+                        helper = Path(__file__).resolve().parent.parent.parent / "scripts" / "korean_voice_probe.py"
+                    if not helper.is_file():
+                        return result
+                    async with asyncio.timeout(2):
+                        process = await asyncio.create_subprocess_exec(
+                            sys.executable, "-I", "-B", str(helper), str(ENGINE_DIR), key,
+                            cwd=key, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+                            limit=8192)
+                        try:
+                            raw = await process.stdout.readexactly(8193)
+                        except asyncio.IncompleteReadError as exc:
+                            raw = exc.partial
+                        if len(raw) <= 8192 and await process.wait() == 0:
+                            payload = json.loads(raw.strip().splitlines()[-1])
+                            if isinstance(payload, dict) and payload.get("ok") is True:
+                                result = status("frontend_ready", "korean_frontend_ready")
+                except asyncio.TimeoutError:
+                    result = status("unavailable", "korean_probe_timeout")
+                except (OSError, ValueError, IndexError):
+                    pass
+                finally:
+                    if process is not None:
+                        if process.returncode is None:
+                            try:
+                                process.kill()
+                            except ProcessLookupError:
+                                pass
+                        # Drain without accumulating after kill, otherwise a paused
+                        # stdout pipe can keep Process.wait() pending forever.
+                        while await process.stdout.read(8192):
+                            pass
+                        await process.wait()
+                if self.engine.state == "ready" and str(self.args.gpt_sovits_dir.resolve()) == key:
+                    self._korean_cache = (key, time.monotonic(), dict(result))
+                return result
+            self._korean_probe_key = key
+            task = self._korean_probe_task = asyncio.create_task(check())
+        result = await asyncio.shield(task)
+        if self.engine.state != "ready" or str(self.args.gpt_sovits_dir.resolve()) != key:
+            return status("unavailable", "tts_unavailable")
+        return dict(result)
+
     def __init__(self, args: argparse.Namespace) -> None:
         self.args = args
         self.speakers = discover_speakers(args.speakers_dir.resolve())
@@ -1477,6 +1587,7 @@ class Server:
             if self.args.verbose:
                 traceback.print_exc()
             await self.sio.emit("error", {"task_id": job.task_id, "turn_id": job.turn_id,
+                                          "code": e.code if isinstance(e, KoreanVoiceUnavailable) else "tts_unavailable",
                                           "error": f"{type(e).__name__}: {e}"}, to=sid)
         finally:
             self.pending -= 1
@@ -1601,6 +1712,9 @@ class Server:
         app = web.Application()
         self.sio.attach(app)
         app.router.add_get("/ping", ping)
+        async def korean_readiness(_req):
+            return web.json_response(await self.korean_readiness())
+        app.router.add_get("/api/korean_readiness", korean_readiness)
         app.router.add_get("/api/characters", characters)
         app.router.add_get("/api/health", health)
         app.router.add_get("/", index)

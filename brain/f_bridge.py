@@ -54,7 +54,20 @@ def history_window(all_turns,endpoint,keep=15,step=5,max_chars=20000):
     return chosen
 
 _FOLLOWUP_CUE=re.compile(r"(?:\b(?:remember|recall|forg[eo]t(?:ten)?|told you|i (?:said|told|mentioned)|did i (?:say|tell|mention)|what did i (?:say|tell))\b"
-    r"|记得|记不记得|(?<!听)说过|提过|讲过|聊过|忘了|忘记|覚えて|言った|話した|忘れ)",re.I)
+    r"|记得|记不记得|(?<!听)说过|提过|讲过|聊过|忘了|忘记|覚えて|言った|話した|忘れ"
+    r"|기억\s*(?:안\s*나|나|해)|내가\s*(?:말했|얘기했|이야기했)|잊었)",re.I)
+
+# Whole-utterance forms only: a short question naming its own topic must not
+# inherit the previous question's topic. These forms have no topic of their own.
+_CONTEXTUAL_FOLLOWUP=re.compile(
+    r"(?:(?:(?:do|do not|don't|can|can't) you\s+(?:not\s+)?)?(?:remember|recall)(?:\s+(?:it|that))?"
+    r"|i\s+(?:already\s+)?(?:told you|said so|mentioned it)|(?:have you\s+)?forgot(?:ten)?(?:\s+(?:it|that))?"
+    r"|(?:what\s+)?did i\s+(?:say|tell you|mention)(?:\s+(?:it|that))?"
+    r"|really|yes|yeah|okay|ok|right|sure|hmm?|mm|and then|go on|tell me more|what about (?:it|that)"
+    r"|(?:你)?(?:还)?(?:记得|记不记得|忘了|忘记了)(?:吗|么)?|我(?:说过|提过|讲过)了?|真的吗|然后呢|继续"
+    r"|(?:それを?)?覚えて(?:る|いる|います|ない)(?:か|の)?|(?:それを?)?忘れた(?:の)?|本当|それで|続けて"
+    r"|(?:그거\s*)?기억\s*(?:안\s*나|나|해|하세요|하니|하지|안\s*나요)(?:요)?"
+    r"|내가\s*(?:말했|얘기했|이야기했)(?:잖아|지)(?:요)?|잊었(?:어|니|나요)|정말|진짜|그래|응|네|계속해)", re.I)
 
 
 # ------------------------------------------------------------------ telemetry
@@ -777,19 +790,17 @@ def install(g):
                 prev=[t for t in g['CONVERSATION_HISTORY'] if t['turn_id']!=turn_id and t.get('protected') and t.get('f_user_text')]
                 # A reflection-initiated (open) turn searches with its own cue.
                 query=original_user or entry.get('inject_cue','') or entry.get('open_cue','')
-                # Follow-up references retain preceding user turns, not prior
-                # assistant claims. This is a disclosed live query adaptation,
-                # revised 2026-09-26: a short follow-up ("I told you", "do you not
-                # remember?") anchors on the most recent substantive user turn
-                # within a bounded lookback, plus the immediately preceding short
-                # turn, so the topic survives a run of brief exchanges.
-                if len(query)<cfg.get('followup_query_chars',160) and prev:
+                # Only topic-less follow-ups borrow preceding user speech.
+                # Unconditionally prefixing short questions mixes independent
+                # topics and can crowd the current topic's correction out of
+                # both the event and fact candidate limits.
+                if (original_user and len(query)<cfg.get('followup_query_chars',160) and prev
+                        and _CONTEXTUAL_FOLLOWUP.fullmatch(query.strip(' \t\r\n.?!。！？…~'))):
                     recent=prev[-max(1,cfg.get('followup_anchor_lookback',6)):]
                     anchor=recent[-1]
                     # Only a recall-style follow-up from the user reaches back to the
-                    # last substantive user turn; other short inputs (and operator
-                    # cues) keep the original one-turn rule so a topic change is not
-                    # pulled toward an older subject.
+                    # last substantive user turn. A short acknowledgement only
+                    # includes the immediately preceding user turn.
                     if original_user and len(query.strip())<cfg.get('followup_reachback_max_chars',100) and _FOLLOWUP_CUE.search(query):
                         min_chars=cfg.get('followup_anchor_min_chars',40)
                         anchor=next((t for t in reversed(recent) if len(t['f_user_text'].strip())>=min_chars),recent[-1])

@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import math
 import re
+import unicodedata
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -69,7 +70,7 @@ _STOP = {
 
 def tokenize(text: str) -> list[str]:
     """English words plus overlapping CJK unigrams/bigrams; no external tokenizer."""
-    value = str(text).casefold()
+    value = unicodedata.normalize("NFC", str(text)).casefold()
     tokens = [word for word in _WORDS.findall(value) if word not in _STOP]
     for run in _CJK.findall(value):
         tokens.extend(run)
@@ -280,6 +281,10 @@ class MemoryMethod:
                     item["entities"].append(value)
         return item
 
+    @staticmethod
+    def _lexical_text(item: dict) -> str:
+        return item["text"] + " " + " ".join(item.get("entities", []))
+
     def _bm25(self, items: list[dict], query: str) -> dict[str, float]:
         if not items:
             return {}
@@ -294,7 +299,7 @@ class MemoryMethod:
             else:
                 counts, frequency, total, start = [], Counter(), 0, 0
             for item in items[start:]:
-                count = Counter(tokenize(item["text"] + " " + " ".join(item.get("entities", []))))
+                count = Counter(tokenize(self._lexical_text(item)))
                 counts.append(count)
                 frequency.update(count.keys())
                 total += sum(count.values())

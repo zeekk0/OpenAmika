@@ -263,7 +263,29 @@ class BridgeTests(unittest.TestCase):
             self.assertNotIn("【记忆记录】", parts["system"])
             self.assertIn("Alder Bay", parts["system"])
 
-    def test_short_input_without_recall_cue_keeps_one_turn_rule(self):
+    def test_korean_recall_cues_reach_substantive_topic_only(self):
+        self.install(seeded=True)
+        substantive = "지난주에 농업용 드론 프로젝트에서 배터리 네 개를 샀는데 각각 사백만 원이 들었어."
+        for cue, recall in (("기억 안 나?", True), ("내가 말했잖아.", True),
+                            ("오늘 저녁 뭐 먹을까?", False), ("새로운 영화 이야기하자.", False)):
+            with self.subTest(cue=cue):
+                self.history.clear()
+                self.turn(turn_id="topic", f_user_text=substantive)
+                self.turn(turn_id="ack1", f_user_text="응응.")
+                self.turn(turn_id="ack2", f_user_text="그래.")
+                turn = self.turn(turn_id="now", f_user_text=cue, f_generation_complete=False)
+                entry = {"cancel": threading.Event()}
+                self.g["_ws_active"]["now"] = entry
+                self.g["_ws_run_generation"]("sid", "now", cue, "surface", "deep", entry)
+                query = self._query_texts()[-1]
+                self.assertEqual(substantive in query, recall)
+                if recall:
+                    self.assertIn("그래.\n" + cue, query)
+                else:
+                    self.assertEqual(query, "task: search result | query: " + cue)
+                self.assertNotIn("응응.", query)
+
+    def test_self_contained_short_input_does_not_inherit_previous_topic(self):
         self.install(seeded=True)
         self.turn(turn_id="t-long", f_user_text="My batteries came from an agriculture drone project and they cost four thousand dollars each.")
         self.turn(turn_id="t-short", f_user_text="Haha, yeah.")
@@ -272,7 +294,52 @@ class BridgeTests(unittest.TestCase):
         self.g["_ws_active"][turn["turn_id"]] = entry
         self.g["_ws_run_generation"]("sid", turn["turn_id"], turn["f_user_text"], "surface", "deep", entry)
         query = self._query_texts()[-1]
-        self.assertEqual(query, "task: search result | query: Haha, yeah.\nWhere did my sister move?")
+        self.assertEqual(query, "task: search result | query: Where did my sister move?")
+
+    def test_actual_korean_corrected_recall_questions_do_not_blend_topics(self):
+        self.install(seeded=True)
+        questions = ["정정한 뒤 나루가 좋아하는 색은 무엇인가요?",
+                     "지금 기억하는 다온이의 단골 음료는 무엇인가요?",
+                     "정정된 소담이의 취미를 알려 주세요.",
+                     "달빛회의 바뀐 모임 요일은 언제인가요?",
+                     "정정한 구름방의 연필 수는 몇 개인가요?",
+                     "별뜰 가운데 나무의 정정된 종류를 말해 주세요.",
+                     "정정된 솔바람의 개점 시각을 알려 주세요.",
+                     "여울이의 그림 제목을 정정한 대로 말해 주세요.",
+                     "해뜰함의 정정된 리본 색을 말해 주세요.",
+                     "정정 후 작은달의 대표 빵은 무엇인가요?"]
+        self.turn(turn_id="corpus-last", f_user_text="문구는 hello예요. 이 인사가 주는 느낌을 우리말로 짧게 설명해 주세요.")
+        for index, question in enumerate(questions):
+            with self.subTest(question=question):
+                ident = "recall-" + str(index)
+                turn = self.turn(turn_id=ident, f_user_text=question, f_generation_complete=False)
+                entry = {"cancel": threading.Event()}
+                self.g["_ws_active"][ident] = entry
+                self.g["_ws_run_generation"]("sid", ident, question, "surface", "deep", entry)
+                self.assertEqual(self._query_texts()[-1], "task: search result | query: " + question)
+
+    def test_multilingual_generic_followups_keep_context_but_named_questions_do_not(self):
+        self.install(seeded=True)
+        topic = "We discussed the fictional character's favorite color during our last long conversation."
+        for question, followup in [("Do you remember?", True), ("你还记得吗？", True),
+                                   ("覚えてる？", True), ("기억 안 나?", True),
+                                   ("What did I say?", True), ("Did I tell you?", True),
+                                   ("Do you remember where my sister moved?", False),
+                                   ("你记得小明喜欢什么颜色吗？", False),
+                                   ("ナオの好きな色を覚えてる？", False),
+                                   ("민수가 좋아하는 색 기억나?", False)]:
+            with self.subTest(question=question):
+                self.history.clear()
+                self.turn(turn_id="topic", f_user_text=topic)
+                self.turn(turn_id="ack", f_user_text="Okay.")
+                self.turn(turn_id="now", f_user_text=question, f_generation_complete=False)
+                entry = {"cancel": threading.Event()}
+                self.g["_ws_active"]["now"] = entry
+                self.g["_ws_run_generation"]("sid", "now", question, "surface", "deep", entry)
+                query = self._query_texts()[-1]
+                self.assertEqual(topic in query, followup)
+                if not followup:
+                    self.assertEqual(query, "task: search result | query: " + question)
 
     def test_long_input_is_its_own_query_and_lookback_is_bounded(self):
         self.install(seeded=True)
