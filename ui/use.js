@@ -1199,7 +1199,7 @@ registerProcessor('pcm-pusher', PCMPusher);`;
       `Hello! I'm ${amika}. So nice to finally meet you in person — we've been talking for ages, and now I've actually moved into your place. Remind me of your name again?`,
       `${state.name}. Got it. So… which city are we in? I want to go out and explore.`,
       `${state.city}! I'm so excited to be here — new streets, new supermarkets, new everything. Okay. Let's get me set up so I can actually talk to you.`,
-      `First, my brain. I think best through OpenRouter — just paste a key, it only costs a few dollars a month. I can also run entirely on your own computer with Ollama, but only with a big model and a big graphics card.`,
+      `First, my brain. I think best through OpenRouter — just paste a key, it only costs a few dollars a month. I can also run entirely on your own computer with Ollama, but only with a big model and a big graphics card. And if you already pay for an OpenAI-compatible endpoint, I can use that instead.`,
       `Last one — let me check I can hear you and that you can hear me.`,
     ];
     const speakCurrent = () => speak(lines()[step], LINE_EMOTION[step]);
@@ -1317,9 +1317,14 @@ registerProcessor('pcm-pusher', PCMPusher);`;
         const olBtn = el("button", { type: "button", class: "prov", "aria-pressed": "false" }, el("b", { text: "Ollama" }), el("span", { text: "fully local · a 27B+ model · a 32 GB GPU or a second PC" }));
         choice.append(orBtn, olBtn);
         const orPanel = el("div", { class: "body" }), olPanel = el("div", { class: "body", hidden: "" });
+        // Declared here, not with the rest of the custom panel below: pick() reads them, and a
+        // caller that ran during this block would hit the temporal dead zone.
+        let cuBtn = null, cuPanel = null;
         const pick = (which) => {
           orPanel.hidden = which !== "openrouter"; olPanel.hidden = which !== "ollama";
+          if (cuPanel) cuPanel.hidden = which !== "custom";
           orBtn.setAttribute("aria-pressed", String(which === "openrouter")); olBtn.setAttribute("aria-pressed", String(which === "ollama"));
+          if (cuBtn) cuBtn.setAttribute("aria-pressed", String(which === "custom"));
           if (which === "ollama") loadOllamaPanel();
         };
         orBtn.addEventListener("click", () => pick("openrouter"));
@@ -1380,11 +1385,52 @@ registerProcessor('pcm-pusher', PCMPusher);`;
         }, "small");
         olPanel.append(el("div", { class: "form-row" }, el("div", { class: "field", style: "flex:2" }, el("label", { text: "Ollama server" }), olUrl), detect), olStatus,
           el("div", { class: "form-row" }, el("div", { class: "field", style: "flex:2" }, el("label", { text: "Model for all four roles" }), olSelect), useBtn), olNote);
-        body.append(choice, orPanel, olPanel);
+        // Custom endpoint: the URL, key and per-model prices are entered in Setup, so the wizard offers a
+        // one-click choice only once a catalog exists there, and otherwise points at the page.
+        cuBtn = el("button", { type: "button", class: "prov", "aria-pressed": "false", hidden: "" },
+          el("b", { text: "My endpoint" }), el("span", { text: "an OpenAI-compatible URL you already set up" }));
+        cuBtn.addEventListener("click", () => pick("custom"));
+        cuPanel = el("div", { class: "body", hidden: "" });
+        const cuNote = el("p", { class: "card-hint", text: "" });
+        const cuUse = button("Use my endpoint", async () => {
+          cuNote.textContent = "switching…";
+          try {
+            await postAction("/api/build_f/preset", "apply-preset", { provider: "custom" });
+            cuNote.textContent = "Her four roles now run on your endpoint.";
+            toast("She now thinks through your endpoint.");
+          } catch (error) {
+            cuNote.textContent = String(error.message || error) +
+              " A preset needs one model that supports JSON schema, so the memory writer has somewhere to go.";
+            toast(String(error.message || error), true);
+          }
+        }, "small primary");
+        // Off from the start: it may only be turned on once the status says the endpoint is ready, and
+        // that answer arrives a request later.
+        cuUse.disabled = true;
+        cuPanel.append(el("p", { class: "hint", text: "Her four roles switch to the endpoint saved in Setup → Brain → Custom endpoint, at the prices you entered there." }), cuUse, cuNote);
+        const cuHint = el("p", { class: "hint", text: "Using an OpenAI-compatible endpoint? Set it up in Setup → Brain → Custom endpoint, then come back to this step." });
+        choice.append(cuBtn);
+        body.append(choice, orPanel, olPanel, cuPanel, cuHint);
         // start on whichever she already uses
         getJSON("/api/build_f/models").then((m) => {
           const t = (role) => { const item = ((m.options || {})[role] || []).find((o) => o.key === (m.selections || {})[role]); return item ? item.transport : "openrouter"; };
-          pick(["surface", "deep", "reflection", "memory_write"].map(t).every((k) => k === "ollama") ? "ollama" : "openrouter");
+          const transports = ["surface", "deep", "reflection", "memory_write"].map(t);
+          const hasCustom = Object.values(m.options || {}).some((rows) => (rows || []).some((o) => o.transport === "custom"));
+          if (hasCustom) { cuBtn.hidden = false; cuHint.hidden = true; }
+          // A preset applied to an endpoint that is blocked, or saved without a key, fails on the
+          // first reply, so the button stays off until Setup can vouch for it.
+          getJSON("/api/build_f/custom").then((info) => {
+            const ready = info && info.configured && info.key_present && !info.blocked && info.preset_ready;
+            cuUse.disabled = !ready;
+            cuUse.title = ready ? ""
+              : info && info.blocked ? "This endpoint is blocked until a save succeeds: " + info.blocked
+              : info && info.configured && info.key_present && !info.preset_ready
+                ? "One model here needs the JSON schema box ticked in Setup, or she cannot run all four roles on it."
+                : "Set the endpoint and its key up in Setup first.";
+            cuNote.textContent = ready ? "" : cuUse.title;
+          }).catch(() => { cuUse.disabled = true; });
+          pick(transports.every((k) => k === "ollama") ? "ollama"
+             : transports.every((k) => k === "custom") ? "custom" : "openrouter");
         }).catch(() => pick("openrouter"));
         actions.append(button("← Back", () => go(2), "small"), button("Skip for now", () => go(4), "small skip"), button("Next →", () => go(4), "primary"));
       } else {

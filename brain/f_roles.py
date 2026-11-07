@@ -31,8 +31,9 @@ import threading
 
 from f_extract import SYSTEM, FACT_INSTRUCTION, parse_isolated_facts
 from f_memory import _write
-from f_openrouter import (ALIBABA, AlibabaClient, OpenRouterClient, alibaba_base_url, alibaba_role_config,
-                          embedding_config, load_alibaba_catalog, load_catalog, role_config)
+from f_openrouter import (ALIBABA, CUSTOM, AlibabaClient, CustomClient, OpenRouterClient, alibaba_base_url,
+                          alibaba_role_config, custom_role_config, embedding_config,
+                          load_alibaba_catalog, load_catalog, load_custom_catalog, role_config)
 from f_ollama import OLLAMA, THINKING_ROLES, OllamaClient, load_ollama_config, ollama_role_config
 
 ROLES = ("surface", "deep", "reflection", "memory_write")
@@ -43,12 +44,68 @@ DEFAULT_NAMES = {"surface": "DEFAULT_SURFACE_MODEL", "deep": "DEFAULT_DEEP_MODEL
 LIST_NAMES = {"surface": "SURFACE_MODEL_KEYS", "deep": "DEEP_MODEL_KEYS", "reflection": "THINKING_MODEL_KEYS"}
 # Role transports (option "provider"); a row without one is OpenRouter. Ollama options are not rows of
 # llm_roles.json: they are generated from config/ollama.json (whatever the local server has pulled).
-PROVIDERS = ("openrouter", ALIBABA, OLLAMA)
+PROVIDERS = ("openrouter", ALIBABA, OLLAMA, CUSTOM)
 # The native memory writer is not an AVAILABLE_MODELS entry; its provider is fixed.
 NATIVE_PROVIDERS = {"claude-sonnet-5": "anthropic"}
 # webui's legacy per-layer model routes (Flask endpoint names) and its model list.
 MODEL_ROUTES = ("api_surface_model", "api_deep_model", "api_thinking_model")
 MODEL_LIST_ROUTE = "get_models"
+
+
+def custom_option_rows(catalog):
+    """Option rows for the custom catalog, per role.
+
+    The memory writer is included only for a model that declared a JSON schema, because
+    that role requires strict structured output and would otherwise be offered an option
+    the manager refuses at selection time.
+    """
+    base = (catalog or {}).get("base") or ""
+    host = base.split("://", 1)[-1].split("/", 1)[0]
+    rows = {}
+    for model_id, row in ((catalog or {}).get("models") or {}).items():
+        for role in ROLES:
+            if role == "memory_write" and row.get("json_mode") != "json_schema":
+                continue
+            rows.setdefault(role, []).append({
+                "key": role + ":" + model_id,
+                "name": row["api_model"] + " (custom endpoint)",
+                "description": "Sends to " + host + ", priced at the rates you entered.",
+                "provider": CUSTOM, "model_id": model_id})
+    return rows
+
+
+def sync_custom_rows(document, catalog):
+    """The role document with this catalog's custom rows and one preset, leaving the rest alone.
+
+    Rows and presets from an earlier catalog are replaced. A selection that pointed at a
+    removed custom row falls back to the fallback preset, then to the first offered option,
+    so a re-saved catalog can never leave the document pointing at nothing.
+    """
+    document = copy.deepcopy(document)
+    rows = custom_option_rows(catalog)
+    for role in ROLES:
+        kept = [row for row in document["options"][role] if row.get("provider") != CUSTOM]
+        document["options"][role] = kept + rows.get(role, [])
+    presets = [p for p in document.get("presets", []) if isinstance(p, dict) and p.get("provider") != CUSTOM]
+    fallback = next((p for p in presets if p.get("name") == document.get("fallback_preset")), None)
+    selections = dict(document["selections"])
+    for role in ROLES:
+        offered = {row["key"] for row in document["options"][role] if not row.get("disabled")}
+        if selections.get(role) in offered:
+            continue
+        chosen = (fallback or {}).get("selections", {}).get(role)
+        if chosen not in offered:
+            chosen = next((row["key"] for row in document["options"][role] if not row.get("disabled")), None)
+        if chosen is None:
+            raise ValueError("No usable model is left for the " + role + " role")
+        selections[role] = chosen
+    document["selections"] = selections
+    if all(rows.get(role) for role in ROLES):
+        host = (catalog.get("base") or "").split("://", 1)[-1].split("/", 1)[0]
+        presets.append({"name": "Custom endpoint: " + host, "provider": CUSTOM,
+                        "selections": {role: rows[role][0]["key"] for role in ROLES}})
+    document["presets"] = presets
+    return document
 
 
 class RoleManager:
@@ -62,6 +119,9 @@ class RoleManager:
         # Loaded on the first Alibaba option only: a deployment without Alibaba options never
         # depends on config/alibaba_models.json.
         self.alibaba = None
+        # Loaded on the first custom option only: a deployment without one never reads
+        # config/custom_models.json, which stays machine-local.
+        self.custom = None
         # The local server's detected models (config/ollama.json; empty until the Setup page detects them).
         self.ollama = load_ollama_config(self.root)
         self.lock = threading.RLock()
@@ -138,6 +198,14 @@ class RoleManager:
             if transport not in PROVIDERS:
                 raise ValueError("Unknown model provider")
             item["transport"] = transport
+            if transport == CUSTOM and not disabled:
+                # A recovery note means a save stopped halfway: the catalog on disk may not match the
+                # rows in this document. Resolving them here would raise before the repair pages exist,
+                # and the whole brain would refuse to start over one provider. Keep them listed and off
+                # until a save republishes them; the roles fall back to their other options.
+                blocked = self.g.get("_custom_unavailable")
+                if blocked:
+                    disabled, reason = True, reason or ("The endpoint is blocked until a save succeeds: " + blocked)
             if not disabled:
                 # A disabled row is listed only; its endpoint is never configured or called.
                 config = self._config(role, transport, row)
@@ -204,10 +272,130 @@ class RoleManager:
             self._apply(selections)
             return self.get()
 
+    def reload_custom(self):
+        """Re-read config/llm_roles.json and config/custom_models.json after a save, swapping the custom
+        options so the page lists the new models without a restart.
+
+        The save route already rewrote the document, so the file is the source of truth. Rows of every
+        other provider stay untouched. Every runtime field this touches is snapshotted first and put
+        back on any failure, so a refused catalog can never leave the manager half-swapped (a cleared
+        catalog with restored rows, or new rows the meter has no prices for).
+        """
+        with self.lock:
+            snapshot = {
+                "custom": self.custom,
+                "document": self.document,
+                "disabled_providers": self.disabled_providers,
+                "options": {role: dict(self.options[role]) for role in ROLES},
+                "registrations": dict(self._registrations),
+                "pricing": dict(self.pricing),
+                "selections": copy.deepcopy(self.selections),
+                "selection_fallback": dict(self.selection_fallback),
+                "available": dict(self.g.get("AVAILABLE_MODELS") or {}),
+                # _add_price writes into the meter's own map, not into self.pricing.
+                "meter_rates": dict((self.meter.pricing or {}).get("models") or {}),
+            }
+            previous = [(role, key, item) for role in ROLES
+                        for key, item in self.options[role].items() if item.get("transport") == CUSTOM]
+            touched = {key for _, key, _ in previous}
+            try:
+                self.custom = None                 # the lazy catalog read has to see the new file
+                document = json.loads(self.path.read_text(encoding="utf-8-sig"))
+                if document.get("version") != 1 or set(document.get("options", {})) != set(ROLES):
+                    raise ValueError("Invalid model role configuration version/options")
+                for role, key, _ in previous:
+                    del self.options[role][key]
+                    self._registrations.pop(key, None)
+                    self.g["AVAILABLE_MODELS"].pop(key, None)
+                for role in ROLES:
+                    for row in document["options"][role]:
+                        if not isinstance(row, dict) or row.get("provider") != CUSTOM:
+                            continue
+                        key = row.get("key")
+                        if not isinstance(key, str) or not key or key in self.options[role]:
+                            raise ValueError("Model option keys must be nonempty and globally unique")
+                        touched.add(key)
+                        self.options[role][key] = self._option(role, key, row)
+                self.g["AVAILABLE_MODELS"].update({key: value for key, value in self._registrations.items()
+                                                   if key in touched})
+                self.document = document
+                self.disabled_providers = self._disabled_providers(document.get("disabled_providers"))
+                selections = copy.deepcopy(self.selections)
+                for role in ROLES:
+                    if selections.get(role) in self.options[role]:
+                        continue
+                    preset = self._fallback_preset()
+                    chosen = (preset or {}).get("selections", {}).get(role)
+                    if chosen not in self.options[role]:
+                        chosen = next(k for k, item in self.options[role].items() if not item.get("disabled"))
+                    selections[role] = chosen
+                self.selection_fallback = {}
+                if selections != document.get("selections"):
+                    document = copy.deepcopy(document)
+                    document["selections"] = selections
+                    _write(self.path, document)
+                    self.document = document
+                self._apply(selections)
+            except Exception:
+                self.custom = snapshot["custom"]
+                self.document = snapshot["document"]
+                self.disabled_providers = snapshot["disabled_providers"]
+                for role in ROLES:
+                    self.options[role].clear()
+                    self.options[role].update(snapshot["options"][role])
+                self._registrations.clear()
+                self._registrations.update(snapshot["registrations"])
+                self.pricing.clear()
+                self.pricing.update(snapshot["pricing"])
+                meter_models = (self.meter.pricing or {}).get("models")
+                if isinstance(meter_models, dict):
+                    meter_models.clear()
+                    meter_models.update(snapshot["meter_rates"])
+                self.selections = snapshot["selections"]
+                self.selection_fallback = snapshot["selection_fallback"]
+                available = self.g.get("AVAILABLE_MODELS")
+                if isinstance(available, dict):
+                    for key in touched:
+                        if key in snapshot["available"]:
+                            available[key] = snapshot["available"][key]
+                        else:
+                            available.pop(key, None)
+                raise
+            return self.get()
+
+    def custom_runtime(self):
+        """The live endpoint and the key that goes with it, read together under the manager lock.
+
+        A caller that read the catalog and the key separately could be paused in between and come back
+        with one save's endpoint and another's key. Everything that builds a custom client reads the
+        pair here instead.
+        """
+        with self.lock:
+            broken = self.g.get("_custom_unavailable")
+            if broken:
+                raise RuntimeError("The custom endpoint is unavailable until a save succeeds: " + broken)
+            if self.custom is None:
+                path = self.root / "config" / "custom_models.json"
+                if not path.is_file():
+                    raise RuntimeError("Custom endpoint needs config/custom_models.json")
+                self.custom = load_custom_catalog(path)
+            key = os.environ.get("CUSTOM_OPENAI_API_KEY") or ""
+            if not key:
+                raise RuntimeError("Custom endpoint key unavailable (CUSTOM_OPENAI_API_KEY)")
+            return {"base": self.custom["base"], "key": key}
+
     def _config(self, role, transport, row):
         if transport == OLLAMA:
             return ollama_role_config(self.ollama, row.get("model_id"), role,
                                       reasoning_enabled=row.get("reasoning_enabled"), max_tokens=row.get("max_tokens"))
+        if transport == CUSTOM:
+            if self.custom is None:
+                path = self.root / "config" / "custom_models.json"
+                if not path.is_file():
+                    raise ValueError("Custom options need config/custom_models.json")
+                self.custom = load_custom_catalog(path)
+            return custom_role_config(self.custom, row.get("model_id"), role, pricing=self.pricing,
+                                      max_tokens=row.get("max_tokens"), reasoning_enabled=row.get("reasoning_enabled"))
         if transport == ALIBABA:
             if self.alibaba is None:
                 path = self.root / "config" / "alibaba_models.json"
@@ -227,6 +415,13 @@ class RoleManager:
         if config.get("transport") == OLLAMA:
             # Local: nothing is charged. A priced (zero) entry keeps the meter's budget gate satisfied.
             self.meter.pricing["models"]["ollama:" + config["model_id"]] = {"input": 0.0, "output": 0.0, "cache_read": 0.0}
+            return
+        if config.get("transport") == CUSTOM:
+            # The person's own rates: the transport prices each call from them, and the
+            # meter uses the same numbers for its reservation and its fallback estimate.
+            price = config["price"]
+            self.meter.pricing["models"]["custom:" + config["model_id"]] = {
+                "input": price["input"], "output": price["output"], "cache_read": price["cache_read"]}
             return
         if config.get("transport") == ALIBABA:
             # Model Studio calls are priced by the transport from the reviewed list price and
@@ -316,6 +511,14 @@ class RoleManager:
         provider = str((entry or {}).get("provider") or "").lower()
         return self.disabled_providers.get(provider)
 
+    def custom_preset_ready(self):
+        """True when the saved catalog also has a preset that may take all four roles.
+
+        A catalog can be saved with no JSON-schema model, and then the memory writer has nowhere to
+        go, so the preset exists but cannot be applied.
+        """
+        return any(p.get("provider") == CUSTOM and p.get("available") for p in self.presets())
+
     def presets(self):
         result = []
         for preset in self.document.get("presets", []):
@@ -382,6 +585,29 @@ class RoleManager:
                     self.selection_fallback = {}
         return self.get()
 
+    @contextlib.contextmanager
+    def custom_write_guard(self):
+        """The exclusion a catalog save needs, taken exactly as set() takes it.
+
+        The flags alone are not enough: a memory or native worker can pick its role, drop the lock and
+        only build its client later, so a save has to keep dispatch and memory work out for the whole
+        commit rather than sampling them once.
+        """
+        with self.lock, self.g["_ws_active_lock"]:
+            if (self.g.get("_ws_active") or self.g.get("_thinking_inflight", 0)
+                    or self.meter.summary()["active_requests"]):
+                raise RuntimeError("Wait for active conversation/model work")
+            with contextlib.ExitStack() as stack:
+                for name in ("_worker_lock", "_query_lock"):
+                    lock = getattr(self.memory, name)
+                    if not lock.acquire(blocking=False):
+                        raise RuntimeError("Wait for active memory work")
+                    stack.callback(lock.release)
+                with self.memory._lock:
+                    if self.memory._active_retrievals or self.memory.status().get("pending"):
+                        raise RuntimeError("Wait for queued memory work")
+                    yield
+
     def apply_preset(self, name=None, provider=None):
         """Select one validated preset for all four roles: by name, or the provider switch
         (the first available preset of that provider). Same locks and refusals as set()."""
@@ -413,6 +639,14 @@ class RoleManager:
 
 def install_roles(g, root, memory, meter, scope, local, pricing):
     """Called at the end of f_bridge.install, after its native meter wrappers."""
+    marker = Path(root) / "config" / "custom_models.recovery.json"
+    if marker.is_file():
+        try:
+            reason = json.loads(marker.read_text(encoding="utf-8-sig")).get("reason") or "a previous save did not finish"
+        except (OSError, ValueError):
+            reason = "a previous save did not finish"
+        # A restart discards memory, not disk: keep the provider off until a save repairs the set.
+        g["_custom_unavailable"] = reason
     manager = RoleManager(g, root, memory, meter, pricing)
     # f_bridge.start() refuses these native providers before any reservation or request.
     g["F_DISABLED_PROVIDERS"] = dict(manager.disabled_providers)
@@ -433,8 +667,9 @@ def install_roles(g, root, memory, meter, scope, local, pricing):
     def after(handle, receipt):
         # Settle billing first. An archive disk error must not erase a paid call.
         transport = receipt.get("transport") or "openrouter"
-        # Model Studio reports no cost: its receipt carries the price-table amount. Ollama costs nothing.
-        extra = ({"reported_cost_usd": receipt.get("cost_usd")} if transport == ALIBABA
+        # Model Studio reports no cost and a custom endpoint may report one in its own extension:
+        # both receipts carry the amount priced from the rates the person was shown. Ollama costs nothing.
+        extra = ({"reported_cost_usd": receipt.get("cost_usd")} if transport in (ALIBABA, CUSTOM)
                  else {"reported_cost_usd": 0.0} if transport == OLLAMA else {})
         meter.finish(handle, usage=receipt["raw_usage"] or None, status=receipt["status"],
                      actual_model=receipt.get("actual_model"), actual_provider=receipt.get("actual_provider"),
@@ -466,6 +701,10 @@ def install_roles(g, root, memory, meter, scope, local, pricing):
                 if configured != base:
                     raise RuntimeError("DASHSCOPE_BASE_URL differs from the reviewed Alibaba endpoint")
             return AlibabaClient(g["http_requests"], key, before, after, base_url=base, event_sink=event_sink)
+        if config is not None and config.get("transport") == CUSTOM:
+            runtime = manager.custom_runtime()      # endpoint and key captured together, under its lock
+            return CustomClient(g["http_requests"], runtime["key"], before, after, base_url=runtime["base"],
+                                event_sink=event_sink)
         key = g.get("OPENROUTER_KEY") or os.getenv("OPENROUTER_API_KEY")
         return OpenRouterClient(g["http_requests"], key, before, after, event_sink=event_sink)
 

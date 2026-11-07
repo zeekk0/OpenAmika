@@ -171,13 +171,15 @@
     }));
     // where she thinks: the provider switch reflects the live selection (mixed = both panels apply)
     const kinds = new Set(ROLES.map((role) => { const item = optionList(role).find((o) => o.key === selections[role]); return item ? item.transport : "openrouter"; }));
-    const onOllama = kinds.has("ollama"), onCloud = kinds.has("openrouter") || kinds.has("alibaba") || kinds.has("native");
+    const onOllama = kinds.has("ollama"), onCustom = kinds.has("custom");
+    const onCloud = kinds.has("openrouter") || kinds.has("alibaba") || kinds.has("native");
     $("provOpenrouter").classList.toggle("active", onCloud);
     $("provOllama").classList.toggle("active", onOllama);
+    $("provCustom").classList.toggle("active", onCustom);
     $("provOpenrouter").querySelector("span").textContent = onCloud && !onOllama ? "in use · recommended · her tested models" : "recommended · her tested models · a few dollars a month";
     $("provOllama").querySelector("span").textContent = onOllama && !onCloud ? "in use · fully local · a 27B+ model" : "fully local · a 27B+ model · a 32 GB GPU or a second PC";
     $("orBackNote").hidden = !onOllama;
-    if (!provChosen) showProvider(onOllama && !onCloud ? "ollama" : "openrouter");
+    if (!provChosen) showProvider(onCustom && !onCloud && !onOllama ? "custom" : onOllama && !onCloud ? "ollama" : "openrouter");
 
     const grid = $("roleGrid");
     grid.replaceChildren();
@@ -215,11 +217,163 @@
   function showProvider(which) {
     $("orPanel").hidden = which !== "openrouter";
     $("ollamaPanel").hidden = which !== "ollama";
+    $("customPanel").hidden = which !== "custom";
     $("provOpenrouter").setAttribute("aria-pressed", String(which === "openrouter"));
     $("provOllama").setAttribute("aria-pressed", String(which === "ollama"));
+    $("provCustom").setAttribute("aria-pressed", String(which === "custom"));
+    if (which === "custom") loadCustom();
   }
   $("provOpenrouter").addEventListener("click", () => { provChosen = true; showProvider("openrouter"); });
   $("provOllama").addEventListener("click", () => { provChosen = true; showProvider("ollama"); loadOllama(); });
+  $("provCustom").addEventListener("click", () => { provChosen = true; showProvider("custom"); });
+
+  // ── custom OpenAI-compatible endpoint: URL, key, model rows and prices ──
+  let customLoaded = false;
+  function cuRow(model) {
+    const row = el("div", { class: "form-row", style: "margin-bottom:6px; align-items:flex-end;" });
+    const input = (label, value, placeholder, type) => {
+      const field = el("div", { class: "field" }, el("label", { text: label }));
+      field.append(el("input", { type: type || "text", value: value == null ? "" : String(value),
+                                 placeholder: placeholder || "", autocomplete: "off" }));
+      return field;
+    };
+    const api = input("Model id at the endpoint", model && model.api_model, "glm-5.3-flash");
+    const context = input("Context", model && model.context, "131072", "number");
+    const priceIn = input("$ / 1M in", model && model.prices && model.prices.input, "0", "number");
+    const priceOut = input("$ / 1M out", model && model.prices && model.prices.output, "0", "number");
+    const schema = el("label", { class: "card-hint", style: "display:flex; gap:6px; align-items:center; padding-bottom:8px;" });
+    const check = el("input", { type: "checkbox" });
+    check.checked = Boolean(model && model.json_mode === "json_schema");
+    schema.append(check, document.createTextNode("JSON schema"));
+    const remove = el("button", { class: "btn small", text: "Remove", type: "button" });
+    remove.addEventListener("click", () => row.remove());
+    row.append(api, context, priceIn, priceOut, schema, remove);
+    row._read = () => {
+      row._invalid = "";
+      const apiModel = api.querySelector("input").value.trim();
+      // A row that came from the catalog and now has no id would otherwise drop out of the save and
+      // take the model with it, silently, while the person watching may have meant to keep it.
+      if (!apiModel) {
+        if (row._loaded && row._loaded.api_model) {
+          row._invalid = "Model id for " + row._loaded.api_model + " is empty. Save it again, or use Remove to drop it.";
+        }
+        return null;
+      }
+      const rawIn = priceIn.querySelector("input").value.trim();
+      const rawOut = priceOut.querySelector("input").value.trim();
+      // Zero is a legitimate price, so a blank field is a mistake, not a zero: the catalog refuses
+      // an unpriced model and the meter would otherwise reserve nothing for a paid one.
+      if (rawIn === "" || rawOut === "") {
+        row._invalid = "Fill in both prices for " + apiModel + " (0 is a valid price).";
+        return null;
+      }
+      const loaded = row._loaded || {};
+      const values = { input: Number(rawIn), output: Number(rawOut) };
+      // cache_read and json_object are shown as the catalog holds them; the panel cannot edit them.
+      if (loaded.prices && typeof loaded.prices.cache_read === "number") values.cache_read = loaded.prices.cache_read;
+      const jsonMode = check.checked ? "json_schema" : null;
+      return { model_id: "custom/" + apiModel, api_model: apiModel,
+               context: (context.querySelector("input").value.trim() === "" ? null
+                         : Number(context.querySelector("input").value.trim())) || null,
+               prices: values, json_mode: jsonMode };
+    };
+    row._loaded = model || {};
+    return row;
+  }
+  function cuRows() { return Array.from($("cuRows").children); }
+  function cuAdd(model) { $("cuRows").append(cuRow(model)); }
+  function cuCollect() {
+    // A row that fails its own check blocks the whole save: sending the remaining rows would replace
+    // the catalog without the model that row described.
+    const models = [];
+    let invalid = "";
+    for (const row of cuRows()) {
+      const model = row._read();
+      if (model) models.push(model);
+      else if (row._invalid && !invalid) invalid = row._invalid;
+    }
+    return { models, invalid };
+  }
+  function cuBusy(on) {
+    // The save replaces what is on screen when it returns, so the fields it will overwrite are closed
+    // until it does. Otherwise a key typed or a row edited during the request is lost without a word.
+    for (const id of ["cuUrl", "cuKey", "cuTest", "cuSave", "cuAddRow"]) {
+      const node = $(id);
+      if (node) node.disabled = on;
+    }
+    for (const row of cuRows()) {
+      for (const node of row.querySelectorAll("input, button")) node.disabled = on;
+    }
+  }
+  let customLoading = null;
+  async function loadCustom() {
+    if (customLoaded) return;
+    if (customLoading) return customLoading;   // a second click joins the call already running
+    customLoading = (async () => {
+    try {
+      const info = await getJSON("/api/build_f/custom");
+      $("cuUrl").value = info.base_url || "";
+      if (info.key_hint) {
+        $("cuKey").placeholder = info.key_hint === "saved" ? "a key is saved" : "saved: " + info.key_hint;
+      }
+      $("cuConfigured").hidden = !info.configured;
+      $("cuConfigured").textContent = info.configured
+        ? "This endpoint is configured with " + info.models.length + " model(s). Saving replaces them."
+        : "";
+      $("cuRows").replaceChildren();
+      for (const model of info.models || []) cuAdd(model);
+      if (!(info.models || []).length) cuAdd(null);
+      // One final render, and a blocked endpoint outranks everything else: it is the only state in
+      // which she refuses to use the endpoint at all.
+      $("cuStatus").textContent = info.blocked
+        ? "Blocked: " + info.blocked + " Fix the write problem, then save the whole configuration again."
+        : (!info.configured ? "not configured yet"
+          : (info.key_present ? "saved" : "saved without a key — add one before she can use it"));
+      customLoaded = true;
+    } catch (error) {
+      $("cuStatus").textContent = "status unavailable: " + (error.message || error);
+    } finally { customLoading = null; cuBusy(false); }
+    })();
+    return customLoading;
+  }
+  $("cuAddRow").addEventListener("click", () => cuAdd(null));
+  $("cuTest").addEventListener("click", async () => {
+    $("cuStatus").textContent = "testing…";
+    try {
+      const r = await postAction("/api/build_f/custom/test", "custom-provider-test",
+                                 { base_url: $("cuUrl").value.trim(), key: $("cuKey").value.trim() });
+      const listed = Array.isArray(r.models) ? r.models : [];
+      $("cuStatus").textContent = "answered with " + listed.length + " model(s): " + listed.slice(0, 4).join(", ");
+    } catch (error) { $("cuStatus").textContent = String(error.message || error); }
+  });
+  $("cuSave").addEventListener("click", async () => {
+    const { models, invalid } = cuCollect();
+    if (invalid) { $("cuStatus").textContent = invalid; return; }
+    if (!models.length) {
+      $("cuStatus").textContent = "Add at least one model first.";
+      return;
+    }
+    $("cuStatus").textContent = "saving…";
+    cuBusy(true);
+    try {
+      const r = await postAction("/api/build_f/custom", "custom-provider",
+                                 { base_url: $("cuUrl").value.trim(), key: $("cuKey").value.trim(), models });
+      $("cuStatus").textContent = r.note || "saved";
+      $("cuKey").value = "";
+      $("cuConfigured").hidden = false;
+      $("cuConfigured").textContent = "This endpoint is configured with " + (r.models || models.length) + " model(s). Saving replaces them.";
+      toast(r.note || "Custom endpoint saved.");
+      loadModels();
+      // The save may have ended blocked, and another tab may have changed it: drop the cached read
+      // and ask again instead of showing the status this panel loaded with.
+      customLoaded = false;
+      loadCustom();
+    } catch (error) {
+      $("cuStatus").textContent = String(error.message || error);
+      customLoaded = false;
+      cuBusy(false);
+    }
+  });
   $("orBack").addEventListener("click", async () => {
     try {
       const r = await postAction("/api/build_f/preset", "apply-preset", { provider: "openrouter" });

@@ -17,6 +17,7 @@ logs/
 *.sqlite-journal
 config/seed.json
 config/ollama.json
+config/custom_models.json
 config/voice_map.json
 servers/openamika-iot/devices.json
 servers/openamika-iot/scenes.json
@@ -72,3 +73,7 @@ vendor/tts-engine/*
 !vendor/tts-engine/README.md
 !vendor/tts-engine/LICENSE
 !vendor/tts-engine/THIRD_PARTY_NOTICES.md
+
+# per-machine runtime state written by a custom-endpoint save in progress
+config/custom_models.recovery.json
+config/custom_models.json

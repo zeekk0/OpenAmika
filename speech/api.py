@@ -682,6 +682,43 @@ async def build_f_ollama_use(request: Request):
     return await _build_f_control(request, "/api/build_f/ollama/use", "ollama-use", ("ok", "selections", "transport", "in_use"))
 
 
+# ── the custom OpenAI-compatible endpoint (config/custom_models.json on the brain) ──
+_CUSTOM_FIELDS = ("ok", "configured", "base_url", "key_hint", "key_present", "models", "note", "in_use",
+                  "blocked", "verified", "preset_ready")
+
+
+@app.get("/api/build_f/custom")
+async def build_f_custom():
+    """The catalog and the key hint the Setup page shows; never the key itself."""
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as client:
+            async with client.get(HANE_URL.rstrip("/") + "/api/build_f/custom", allow_redirects=False) as response:
+                if response.status != 200:
+                    raise HTTPException(status_code=503, detail="The custom endpoint status is unavailable.")
+                payload = await response.json()
+        if not isinstance(payload, dict) or payload.get("ok") is not True:
+            raise ValueError("Unexpected custom endpoint status")
+        return {key: payload.get(key) for key in _CUSTOM_FIELDS}
+    except HTTPException:
+        raise
+    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+        raise HTTPException(status_code=503,
+                            detail="The custom endpoint status is unavailable (is the brain running?).") from None
+
+
+@app.post("/api/build_f/custom")
+async def build_f_custom_save(request: Request):
+    """Validate the URL and key against the endpoint, then write the catalog, the key and one role row per model."""
+    return await _build_f_control(request, "/api/build_f/custom", "custom-provider", _CUSTOM_FIELDS, timeout=40)
+
+
+@app.post("/api/build_f/custom/test")
+async def build_f_custom_test(request: Request):
+    """One GET against the endpoint. Touches no conversational state, so it may run while she talks."""
+    return await _build_f_control(request, "/api/build_f/custom/test", "custom-provider-test",
+                                  ("ok", "models", "base_url"), check_busy=False, timeout=40)
+
+
 @app.post("/api/build_f/preset")
 async def build_f_preset(request: Request):
     """Apply a tested preset by name, or the first validated preset of a provider ({"provider": "openrouter"})."""
@@ -723,7 +760,9 @@ async def _build_f_control(request, route, action, allowed_fields, max_body=8192
             async with client.post((base or HANE_URL).rstrip("/") + route, json=payload,
                                    headers={"X-Build-F-Action": action}, allow_redirects=False) as response:
                 result = await response.json()
-                if response.status in (400, 403, 409, 503):
+                # 502 is a confirmed answer from the endpoint (it replied with an error), so it carries
+                # real guidance. Only a transport failure is unconfirmed.
+                if response.status in (400, 401, 403, 409, 502, 503):
                     message = (result.get("error", "Action was refused.") if isinstance(result, dict)
                                else "Action was refused.")
                     code = result.get("code") if isinstance(result, dict) else None
