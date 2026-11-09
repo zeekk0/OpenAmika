@@ -4,7 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#14091a">
-<title>OpenAmika Harness by MekaHime</title>
+<title data-i18n="flow.title">OpenAmika Harness by MekaHime</title>
+<script src="/ui/i18n.js"></script>
+<script src="/ui/locales/common.js"></script>
+<script src="/ui/locales/flow.js"></script>
 <link rel="stylesheet" href="/ui/openamika.css">
 <style>
 /* OpenAmika Harness map — page-only styles on top of the shared MekaHime tokens (ui/openamika.css). */
@@ -131,27 +134,27 @@
 <body>
 <main class="oa-main">
   <div class="oa-page-head rv" style="--d:0">
-    <h1>OpenAmika <em>Harness</em> by MekaHime</h1>
-    <p class="sub">The map of what actually runs: one launcher, four local components, the services around them, and the path a spoken
+    <h1 data-i18n="flow.title">OpenAmika Harness by MekaHime</h1>
+    <p class="sub" data-i18n="flow.intro">The map of what actually runs: one launcher, four local components, the services around them, and the path a spoken
     turn takes from your microphone to her voice. Click a block or an arrow; drag to pan, scroll to zoom. Nothing on this page calls a model.</p>
   </div>
 
   <section class="tech-card flow-card rv" style="--d:1">
-    <nav class="flow-toolbar" aria-label="Map views">
-      <div class="flow-views" role="group" aria-label="Focus map">
-        <button class="view active" type="button" data-view="turn" aria-pressed="true">01 · One turn</button>
-        <button class="view" type="button" data-view="processes" aria-pressed="false">02 · Processes &amp; ports</button>
-        <button class="view" type="button" data-view="tools" aria-pressed="false">03 · Tools &amp; home</button>
-        <button class="view" type="button" data-view="memory" aria-pressed="false">04 · Memory &amp; money</button>
-        <button class="view" type="button" data-view="all" aria-pressed="false">Full system</button>
+    <nav class="flow-toolbar" aria-label="Map views" data-i18n-aria-label="flow.mapViews">
+      <div class="flow-views" role="group" aria-label="Focus map" data-i18n-aria-label="flow.focusMap">
+        <button class="view active" type="button" data-view="turn" data-i18n="flow.turn" aria-pressed="true">01 · One turn</button>
+        <button class="view" type="button" data-view="processes" data-i18n="flow.processes" aria-pressed="false">02 · Processes &amp; ports</button>
+        <button class="view" type="button" data-view="tools" data-i18n="flow.tools" aria-pressed="false">03 · Tools &amp; home</button>
+        <button class="view" type="button" data-view="memory" data-i18n="flow.memory" aria-pressed="false">04 · Memory &amp; money</button>
+        <button class="view" type="button" data-view="all" data-i18n="flow.all" aria-pressed="false">Full system</button>
       </div>
-      <label class="flow-finder" for="jump">Find <select id="jump"></select></label>
+      <label class="flow-finder" for="jump"><span data-i18n="flow.find">Find</span> <select id="jump"></select></label>
     </nav>
     <div class="flow-main">
-      <div id="stage" class="flow-stage" tabindex="0" role="region"
+      <div id="stage" data-i18n-aria-label="flow.mapAria" class="flow-stage" tabindex="0" role="region"
            aria-label="Interactive architecture map. Drag the background to pan, scroll to zoom. Tab to blocks and connections; Enter selects. Arrow keys pan; F fits; R resets the layout.">
         <div id="world" class="world">
-          <svg id="edges" class="edges" aria-label="Connections"><defs>
+          <svg id="edges" class="edges" aria-label="Connections" data-i18n-aria-label="flow.connections"><defs>
             <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10z" fill="rgba(245,235,228,.45)"/></marker>
             <marker id="arrowOn" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10z" fill="#d8b4e2"/></marker>
           </defs></svg>
@@ -159,28 +162,28 @@
           <div id="nodes"></div>
         </div>
         <div id="caption" class="canvas-caption"></div>
-        <div class="controls" aria-label="Canvas controls">
-          <button class="btn small" type="button" id="zoomOut" aria-label="Zoom out">−</button>
+        <div class="controls" aria-label="Canvas controls" data-i18n-aria-label="flow.canvasControls">
+          <button class="btn small" type="button" id="zoomOut" aria-label="Zoom out" data-i18n-aria-label="flow.zoomOut">−</button>
           <span id="zoomValue" class="zoom-value">100%</span>
-          <button class="btn small" type="button" id="zoomIn" aria-label="Zoom in">+</button>
-          <button class="btn small" type="button" id="fit" title="Fit the visible map (F)">Fit</button>
-          <button class="btn small" type="button" id="reset" title="Reset block positions and fit (R)">Reset</button>
-          <button class="btn small" type="button" id="guide" title="How to read this map">Guide</button>
+          <button class="btn small" type="button" id="zoomIn" aria-label="Zoom in" data-i18n-aria-label="flow.zoomIn">+</button>
+          <button class="btn small" type="button" id="fit" data-i18n="flow.fit" data-i18n-title="flow.fitTitle" title="Fit the visible map (F)">Fit</button>
+          <button class="btn small" type="button" id="reset" data-i18n="flow.reset" data-i18n-title="flow.resetTitle" title="Reset block positions and fit (R)">Reset</button>
+          <button class="btn small" type="button" id="guide" data-i18n="flow.guide" data-i18n-title="flow.guideTitle" title="How to read this map">Guide</button>
         </div>
-        <div class="canvas-help">drag blocks · click arrows · scroll to zoom</div>
+        <div class="canvas-help" data-i18n="flow.canvasHelp">drag blocks · click arrows · scroll to zoom</div>
       </div>
-      <aside id="inspector" class="flow-inspector" aria-label="Component details"></aside>
+      <aside id="inspector" class="flow-inspector" aria-label="Component details" data-i18n-aria-label="flow.details"></aside>
     </div>
     <div class="flow-legend">
-      <span><i style="--c:var(--primary)"></i>Browser</span>
-      <span><i style="--c:var(--viz-stts)"></i>Speech gateway</span>
-      <span><i style="--c:var(--viz-surface)"></i>Brain</span>
-      <span><i style="--c:var(--viz-embed)"></i>Local models</span>
-      <span><i style="--c:var(--viz-reflection)"></i>Services</span>
-      <span><i style="--c:var(--viz-dtts)"></i>Agents &amp; MCP</span>
-      <span><i style="--c:var(--viz-deep)"></i>Home</span>
-      <span><i style="--c:var(--viz-writer)"></i>Launcher</span>
-      <span class="fine">ports from settings.json &amp; config/tools.json · no AI calls from this page</span>
+      <span><i style="--c:var(--primary)"></i><span data-i18n="flow.browser">Browser</span></span>
+      <span><i style="--c:var(--viz-stts)"></i><span data-i18n="flow.gateway">Speech gateway</span></span>
+      <span><i style="--c:var(--viz-surface)"></i><span data-i18n="flow.brain">Brain</span></span>
+      <span><i style="--c:var(--viz-embed)"></i><span data-i18n="flow.models">Local models</span></span>
+      <span><i style="--c:var(--viz-reflection)"></i><span data-i18n="flow.services">Services</span></span>
+      <span><i style="--c:var(--viz-dtts)"></i><span data-i18n="flow.agents">Agents &amp; MCP</span></span>
+      <span><i style="--c:var(--viz-deep)"></i><span data-i18n="flow.home">Home</span></span>
+      <span><i style="--c:var(--viz-writer)"></i><span data-i18n="flow.launcher">Launcher</span></span>
+      <span class="fine" data-i18n="flow.fine">ports from settings.json &amp; config/tools.json · no AI calls from this page</span>
     </div>
   </section>
 </main>
@@ -192,6 +195,8 @@
 (function () {
   "use strict";
   const { nav, footer, el } = window.OA;
+  const t = (key, params) => window.OAI18n.t(key, params);
+  window.OAI18n.translate();
   nav("flow"); footer();
   const $ = (id) => document.getElementById(id);
 
@@ -343,7 +348,7 @@
         "Reset cost meter (Setup) starts a new display period; the lifetime ledger stays." ] }] },
     { id: "openrouter", title: "OpenRouter", sub: "all four roles · chat completions", icon: "☁", layer: "service", group: "external API", external: true,
       source: "brain/f_openrouter.py · https://openrouter.ai/api/v1/chat/completions · key in brain/.env (Setup → Brain)",
-      summary: "The only account OpenAmika needs. Surface, deep, reflection and memory writer each map to a model chosen on the Setup page (config/llm_roles.json presets); the clerk reuses one of those roles.",
+      summary: "The external API used when OpenRouter is selected on Setup. Surface, deep, reflection and memory writer each map to a model (config/llm_roles.json); the clerk reuses one of those roles. If another provider is selected, its route is used instead.",
       sections: [{ title: "Notes", items: [
         "Model choices change the rates of new calls only; each ledger row keeps its own snapshot.",
         "Hermes Agent is configured to use OpenRouter too, with its own model (config/tools.json env) — its spend shows up under Agents.",
@@ -578,6 +583,40 @@
     background: "Dotted lavender arrows run after she has spoken, in the background; the next turn never waits for them.",
     launch: "Dotted grey arrows are the launcher starting a process and waiting for its health check.",
   };
+  const architectureCatalog = { en: {}, ko: {} };
+  const korean = window.OAFlowKorean;
+  function localizedField(object, field, key, translation) {
+    const original = object[field];
+    if (typeof translation !== "string") throw new Error("Missing architecture translation: " + key);
+    architectureCatalog.en[key] = original;
+    architectureCatalog.ko[key] = translation;
+    Object.defineProperty(object, field, { enumerable: true, get: () => t(key) });
+  }
+  for (const node of NODES) {
+    const translated = korean.nodes[node.id], prefix = "flow.node." + node.id + ".";
+    localizedField(node, "source", prefix + "source", korean.sources[node.id]);
+    for (const field of ["title", "sub", "summary", "note"]) {
+      if (node[field]) localizedField(node, field, prefix + field, translated[field]);
+    }
+    if (korean.groups[node.group]) localizedField(node, "group", prefix + "group", korean.groups[node.group]);
+    node.sections.forEach((section, i) => {
+      localizedField(section, "title", prefix + "section." + i, korean.sectionTitles[section.title]);
+      section.items.forEach((item, j) => localizedField(section.items, j, prefix + "item." + i + "." + j, translated.sections[i][j]));
+    });
+  }
+  EDGES.forEach((edge, i) => {
+    localizedField(edge, "label", "flow.edge." + edge.id + ".label", korean.edges[i][0]);
+    localizedField(edge, "description", "flow.edge." + edge.id + ".description", korean.edges[i][1]);
+  });
+  for (const view of Object.values(VIEWS)) view.lanes = view.lanes.map((lane) => lane.slice());
+  for (const [id, view] of Object.entries(VIEWS)) {
+    localizedField(view, "title", "flow.view." + id + ".title", korean.views[id][0]);
+    localizedField(view, "description", "flow.view." + id + ".description", korean.views[id][1]);
+    view.lanes.forEach((lane, i) => localizedField(lane, 2, "flow.view." + id + ".lane." + i, korean.lanes[lane[2]]));
+  }
+  for (const id of Object.keys(LAYER)) localizedField(LAYER, id, "flow.layer." + id, korean.layers[id]);
+  for (const id of Object.keys(KIND_NOTE)) localizedField(KIND_NOTE, id, "flow.kindNote." + id, korean.kinds[id]);
+  window.OAI18n.register(architectureCatalog);
   const byId = new Map(NODES.map((n) => [n.id, n]));
   const stage = $("stage"), world = $("world"), svg = $("edges"), nodesEl = $("nodes"), labelsEl = $("labels"), inspector = $("inspector");
   const W = 210, H = 94;
@@ -703,20 +742,20 @@
     inspector.replaceChildren(
       el("p", { class: "eyebrow", text: n.group }),
       el("h2", { text: n.title }),
-      el("div", { class: "badges" }, badge(LAYER[n.layer] || n.layer), n.port ? badge("port " + n.port, "port") : null,
-        n.external ? badge("separate process") : null),
+      el("div", { class: "badges" }, badge(LAYER[n.layer] || n.layer), n.port ? badge(t("flow.port", { port: n.port }), "port") : null,
+        n.external ? badge(t("flow.separate")) : null),
       el("p", { class: "lead", text: n.summary }));
     appendSections(n.sections);
     if (n.note) inspector.append(el("div", { class: "note-box", text: n.note }));
-    const links = section("Connections");
+    const links = section(t("flow.connections"));
     for (const edge of EDGES.filter((e) => e.from === id || e.to === id)) {
       const incoming = edge.to === id, other = byId.get(incoming ? edge.from : edge.to);
-      links.append(relation(incoming ? "IN" : "OUT", other.title + " · " + edge.label, () => showEdge(edge.id)));
+      links.append(relation(incoming ? t("flow.in") : t("flow.out"), other.title + " · " + edge.label, () => showEdge(edge.id)));
     }
-    section("Where it lives", el("p", { class: "source", text: n.source }));
+    section(t("flow.source"), el("p", { class: "source", text: n.source }));
     related();
     inspector.scrollTop = 0;
-    announce(n.title + " selected");
+    announce(t("flow.selected", { name: n.title }));
     if (focus) centerNode(id);
   }
   function showEdge(id) {
@@ -724,42 +763,31 @@
     if (!positions[e.from] || !positions[e.to]) setView("all", false);
     selection = { type: "edge", id };
     inspector.replaceChildren(
-      el("p", { class: "eyebrow", text: "Connection · " + e.kind }),
+      el("p", { class: "eyebrow", text: t("flow.connection", { kind: t("flow.kind_" + e.kind) }) }),
       el("h2", { text: e.label }),
       el("p", { class: "lead", text: e.description }));
-    section("Route",
-      relation("FROM", byId.get(e.from).title, () => showNode(e.from, true)),
-      relation("TO", byId.get(e.to).title, () => showNode(e.to, true)));
-    section("Read this arrow", el("p", { text: KIND_NOTE[e.kind] || KIND_NOTE.data }));
+    section(t("flow.route"),
+      relation(t("flow.from"), byId.get(e.from).title, () => showNode(e.from, true)),
+      relation(t("flow.to"), byId.get(e.to).title, () => showNode(e.to, true)));
+    section(t("flow.readArrow"), el("p", { text: KIND_NOTE[e.kind] || KIND_NOTE.data }));
     related();
     inspector.scrollTop = 0;
-    announce("Connection selected: " + e.label);
+    announce(t("flow.edgeSelected", { name: e.label }));
   }
   function showGuide() {
     selection = null;
     related();
     inspector.replaceChildren(
       el("p", { class: "eyebrow", text: "OpenAmika Harness · " + VIEWS[currentView].title }),
-      el("h2", { text: "What runs, and how one turn moves through it." }),
-      el("p", { class: "lead", text: "One launcher (launch.py) brings up four local components — the embedder, the brain, the vision service and the speech gateway — and the services around them: the TTS server, the MQTT broker, zigbee2mqtt and two agents. The browser talks only to the gateway on port 53010; the gateway talks to everything else." }),
-      el("div", { class: "note-box", text: "Select a block or an arrow. The panel says what it does, where its code lives and which port it listens on. Drag blocks to untangle a route; Reset restores the layout. Nothing here calls a model or touches the running system." }));
+      el("h2", { text: t("flow.guideHeading") }),
+      el("p", { class: "lead", text: t("flow.guideLead") }),
+      el("div", { class: "note-box", text: t("flow.guideNote") }));
     appendSections([
-      { title: "Four maps", items: [
-        "One turn: microphone → gateway → brain (surface first, then deep) → sentences → TTS → the Live2D stage — and what runs after she has spoken.",
-        "Processes & ports: what the launcher starts, in which order, with which health check.",
-        "Tools & home: the post-speech clerk, the MCP bridges to Hermes and nanoMuse, and the Zigbee plugs behind mosquitto and zigbee2mqtt.",
-        "Memory & money: evidence memory, the memory writer, the local embedder, OpenRouter and the usage ledger." ] },
-      { title: "Keyboard & touch", items: [
-        "Tab to blocks and connection labels; Enter or Space opens details.",
-        "Focus the canvas: arrow keys pan, + / − zoom, F fits, R resets.",
-        "Focus a block: arrow keys move it; hold Shift for larger steps. Drag with mouse or touch.",
-        "Escape returns to this guide." ] },
-      { title: "Where the facts come from", items: [
-        "Ports: settings.json (brain 5202, gateway 53000, embedder 8011, vision 8014, TTS 8002, MQTT 1883, zigbee2mqtt 8080) and config/tools.json (Hermes 8642, nanoMuse 8787).",
-        "Devices: IoT/data (zigbee2mqtt) — four Third Reality smart plugs on a SONOFF Dongle Plus MG24.",
-        "Protocols: speech/api.py, brain/webui.py, brain/f_tools.py, vision/vlm_service.py, ui/use.js and docs/ARCHITECTURE.md." ] },
+      { title: t("flow.fourMaps"), items: [t("flow.map1"), t("flow.map2"), t("flow.map3"), t("flow.map4")] },
+      { title: t("flow.keyboard"), items: [t("flow.key1"), t("flow.key2"), t("flow.key3"), t("flow.key4")] },
+      { title: t("flow.facts"), items: [t("flow.fact1"), t("flow.fact2"), t("flow.fact3")] },
     ]);
-    const s = section("Start here");
+    const s = section(t("flow.startHere"));
     for (const id of ["stt", "deep", "clerk", "launcher"]) s.append(relation("→", byId.get(id).title, () => showNode(id, true)));
     inspector.scrollTop = 0;
   }
@@ -774,10 +802,10 @@
   // ── blocks on the canvas (drag with pointer or arrow keys) ──
   function createNode(n) {
     const node = el("button", { class: "node " + n.layer + (n.external ? " external" : ""), type: "button", "data-node": n.id,
-        "aria-pressed": "false", "aria-label": n.title + ". " + n.sub + ". Select for details; drag to move." },
+        "aria-pressed": "false", "aria-label": n.title + ". " + n.sub + ". " + t("flow.inspect") },
       el("span", { class: "node-line" }, el("span", { class: "node-icon", text: n.icon }), el("span", { class: "node-title", text: n.title })),
       el("span", { class: "node-sub", text: n.sub }),
-      el("span", { class: "node-meta" }, n.group, n.port ? el("span", { class: "port", text: ":" + n.port }) : null));
+      el("span", { class: "node-meta" }, el("span", { class: "node-group", text: n.group }), n.port ? el("span", { class: "port", text: ":" + n.port }) : null));
     node.addEventListener("click", () => {
       if (node.dataset.dragged === "yes") { node.dataset.dragged = "no"; return; }   // a drag is not a click
       showNode(n.id);
@@ -830,7 +858,7 @@
       g.setAttribute("class", "edge " + e.kind);
       g.dataset.edge = e.id;
       g.setAttribute("role", "button"); g.setAttribute("tabindex", "0");
-      g.setAttribute("aria-label", byId.get(e.from).title + " to " + byId.get(e.to).title + ": " + e.label);
+      g.setAttribute("aria-label", byId.get(e.from).title + " → " + byId.get(e.to).title + ": " + e.label);
       for (const type of ["vis", "hit"]) {
         const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
         path.setAttribute("class", "edge-" + type);
@@ -853,7 +881,7 @@
       b.classList.toggle("active", active);
       b.setAttribute("aria-pressed", String(active));
     });
-    $("caption").replaceChildren(el("span", { class: "brand", text: "OpenAmika Harness by MekaHime" }), " · ",
+    $("caption").replaceChildren(el("span", { class: "brand", text: t("flow.title") }), " · ",
       el("b", { text: view.title + " · " }), view.description);
     redraw();
     fit();
@@ -904,9 +932,36 @@
   $("fit").addEventListener("click", fit);
   $("reset").addEventListener("click", () => setView(currentView));
   $("guide").addEventListener("click", showGuide);
-  $("jump").replaceChildren(el("option", { value: "", text: "Choose a component…" }),
+  $("jump").replaceChildren(el("option", { value: "", text: t("flow.pick") }),
     ...[...NODES].sort((a, b) => a.title.localeCompare(b.title)).map((n) => el("option", { value: n.id, text: n.title })));
   $("jump").addEventListener("change", (e) => { if (e.target.value) showNode(e.target.value, true); e.target.value = ""; });
+  window.addEventListener("oa:localechange", () => {
+    // Keep node elements, positions, pan, zoom, selection, and any active pointer drag intact.
+    for (const [id, node] of nodeEls) {
+      const n = byId.get(id);
+      node.querySelector(".node-title").textContent = n.title;
+      node.querySelector(".node-sub").textContent = n.sub;
+      node.querySelector(".node-group").textContent = n.group;
+      node.setAttribute("aria-label", n.title + ". " + n.sub + ". " + t("flow.inspect"));
+    }
+    for (const edge of EDGES) {
+      const route = byId.get(edge.from).title + " → " + byId.get(edge.to).title;
+      const group = edgeEls.get(edge.id), label = labelEls.get(edge.id);
+      if (group) group.setAttribute("aria-label", route + ": " + edge.label);
+      if (label) { label.textContent = edge.label; label.title = route; }
+    }
+    world.querySelectorAll(".lane").forEach((node, i) => { node.textContent = VIEWS[currentView].lanes[i][2]; });
+    $("caption").replaceChildren(el("span", { class: "brand", text: t("flow.title") }), " · ",
+      el("b", { text: VIEWS[currentView].title + " · " }), VIEWS[currentView].description);
+    for (const option of $("jump").options) option.textContent = option.value ? byId.get(option.value).title : t("flow.pick");
+    const scroll = inspector.scrollTop;
+    const focused = [...inspector.querySelectorAll("button")].indexOf(document.activeElement);
+    if (selection && selection.type === "node") showNode(selection.id, false);
+    else if (selection && selection.type === "edge") showEdge(selection.id);
+    else showGuide();
+    if (focused >= 0) inspector.querySelectorAll("button")[focused]?.focus({ preventScroll: true });
+    inspector.scrollTop = scroll;
+  });
   let resizeTimer = null;
   new ResizeObserver(() => { clearTimeout(resizeTimer); resizeTimer = setTimeout(fit, 80); }).observe(stage);
   setView("turn");

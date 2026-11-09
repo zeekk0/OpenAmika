@@ -56,4 +56,4 @@ ToJyutping==3.2.0              # Cantonese
 g2pk2==0.0.3                   # Korean
 ko_pron==1.3
 jamo==0.4.1
-python_mecab_ko==1.3.7; sys_platform != 'win32'   # upstream marker
+python_mecab_ko==1.3.7        # Windows too: shared wheel-backed Korean tokenizer

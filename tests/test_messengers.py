@@ -87,6 +87,40 @@ def test_incoming_text_is_one_trimmed_line_with_a_cap():
     assert len(core.incoming_text("y" * 5000)) == core.MAX_INCOMING
 
 
+def test_korean_incoming_and_outgoing_preserve_unicode():
+    assert core.incoming_text("  안녕하세요\r\n민수예요  ") == "안녕하세요 민수예요"
+    text = "한국 문학이 좋아요. " * 30
+    pieces = core.split_message(text, 60)
+    assert all(len(piece) <= 60 for piece in pieces)
+    assert "".join(pieces).replace(" ", "") == text.replace(" ", "")
+    assert core.replies_from("deep_done", {"speech": "한국어로 이야기하자!", "thought": "private"}) == ["한국어로 이야기하자!"]
+
+
+def test_korean_outbox_turn_preserves_request_reply_and_archive_boundary():
+    async def scenario():
+        svc = FakeService()
+        chat = FakeChat()
+        worker = asyncio.create_task(svc.outbox.run())
+        try:
+            await svc.outbox.put(chat, "내 이름은 민수야", "telegram")
+            await asyncio.sleep(0.05)
+            assert len(svc.brain.sent) == 1
+            text, turn_id, context = svc.brain.sent[0]
+            assert text == "내 이름은 민수야"
+            await svc.outbox.on_event("begin", {"turn_id": turn_id, "reply_lang": "ko"})
+            await svc.outbox.on_event("surface_done", {"turn_id": turn_id, "reply": "민수야, 반가워!"})
+            await svc.outbox.on_event("deep_done", {"turn_id": turn_id, "speech": "한국어로 이야기하자.", "thought": "不发送"})
+            await svc.outbox.on_event("end", {"turn_id": turn_id})
+            await asyncio.sleep(0.05)
+            assert chat.out == ["민수야, 반가워!", "한국어로 이야기하자."]
+            assert svc.brain.protected == 1
+            assert svc.brain.spoken == [turn_id]
+        finally:
+            worker.cancel()
+            await asyncio.gather(worker, return_exceptions=True)
+    asyncio.run(scenario())
+
+
 def test_replies_from_events():
     assert core.replies_from("surface_done", {"reply": "【Sigh】okay."}) == ["okay."]
     assert core.replies_from("deep_done", {"speech": "the real answer", "thought": "private"}) == ["the real answer"]

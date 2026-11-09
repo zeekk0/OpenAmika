@@ -6,7 +6,8 @@
 
 用法（api 侧）：pause_after(emotion_key, lang) -> 秒数；随 tts 段下发给前端，
 前端把这段静音加进无缝播放时间轴。语言取 _detect_lang 的结果
-（CHINESE / JAPANESE / ENGLISH / MIXED），MIXED 归到中文档。
+（CHINESE / JAPANESE / ENGLISH / KOREAN / MIXED），MIXED 归到中文档。
+KOREAN 显式使用 DEFAULT_PAUSE，不借用中文调参。
 
 声效段不在此表内（声效不是"一句话"），其句后停顿固定为 0。
 
@@ -107,6 +108,8 @@ PAUSE_TABLE = {
 def pause_after(emotion_key: str, lang: str) -> float:
     """前一句的实际情绪 + 语言 → 句后停顿秒数。
     认不出的情绪/语言一律退默认；MIXED 归中文档。"""
+    if (lang or "").upper() == "KOREAN":
+        return DEFAULT_PAUSE
     row: Tuple[float, float, float] = PAUSE_TABLE.get(emotion_key or "")
     if not row:
         return DEFAULT_PAUSE

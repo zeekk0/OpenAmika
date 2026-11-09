@@ -32,6 +32,76 @@ def rows():
     return {name: (mark.strip(), detail) for mark, name, detail in core.ROWS}
 
 
+def test_korean_check_is_read_only_and_keeps_exit_code(checkout, monkeypatch, capsys):
+    monkeypatch.setattr(core, "gpu_info", lambda: None)
+    monkeypatch.setattr(core, "hf_cached", lambda repo: None)
+    monkeypatch.setattr(core, "ensure_speech_model", lambda args: None)
+    assert core.main(["--check", "--lang", "ko"]) == 1
+    out = capsys.readouterr().out
+    assert "설치 요약" in out and "준비되지 않았습니다" in out
+    assert "settings.json" in out and "--check" in out
+    assert sorted(p.name for p in checkout.iterdir()) == [".env.example", "brain", "settings.example.json"]
+
+
+def test_korean_help(capsys):
+    with pytest.raises(SystemExit) as exc:
+        core.main(["--lang", "ko", "--help"])
+    assert exc.value.code == 0
+    assert "설치" in capsys.readouterr().out
+
+
+def test_korean_cpu_and_vision_readiness(checkout, monkeypatch, capsys):
+    monkeypatch.setattr(core, "IS_MAC", False)
+    monkeypatch.setattr(core, "gpu_info", lambda: None)
+    monkeypatch.setattr(core, "ensure_speech_model", lambda args: None)
+    core.main(["--check", "--cpu", "--lang", "ko"])
+    out = capsys.readouterr().out
+    assert "CPU에서" in out and "설치되지 않았습니다" in out
+    assert "no NVIDIA GPU found" not in out
+
+
+def test_korean_existing_settings_recovery(checkout):
+    make_envs(checkout, "brain", "speech", "embed")
+    core.ensure_settings("cpu", False, core.argparse.Namespace(check=False))
+    core.env_python(checkout / "envs" / "speech").unlink()
+    core.ROWS.clear()
+    core.ensure_settings("cpu", False, core.argparse.Namespace(check=False, lang="ko"))
+    assert "기존 설정" in rows()["settings.json"][1]
+
+
+def test_korean_import_failure_keeps_raw_exception(checkout, monkeypatch):
+    make_envs(checkout, "brain")
+    original = "ImportError: cannot import {raw_symbol}"
+    monkeypatch.setattr(core, "probe", lambda *args: {"ok": {}, "bad": {"flask": original}})
+    with pytest.raises(core.SetupError) as caught:
+        core.ensure_env("brain", [], "cpu", core.argparse.Namespace(check=True, lang="ko"))
+    assert "모듈을 가져오지 못했습니다" in str(caught.value)
+    assert "--check" in str(caught.value) and original in str(caught.value)
+
+
+def test_korean_main_warnings_without_installing(checkout, monkeypatch, capsys):
+    monkeypatch.setattr(core.base, "find_base_python", lambda explicit: ([sys.executable], (3, 11, 9)))
+    monkeypatch.setattr(core.base, "disk_free_gb", lambda path: 10)
+    monkeypatch.setattr(core, "synced_by_onedrive", lambda path: True)
+    monkeypatch.setattr(core, "long_folder_warning", lambda path: "original path warning")
+    monkeypatch.setattr(core, "gpu_info", lambda: None)
+    for name in ("ensure_env", "ensure_speech_model", "ensure_hf_model", "ensure_settings", "ensure_env_file"):
+        monkeypatch.setattr(core, name, lambda *args: None)
+    assert core.main(["--lang", "ko", "--vision", "off"]) == 0
+    out = capsys.readouterr().out
+    assert "여유 공간" in out and "동기화 대상" in out and "Windows 경로" in out
+    assert "다음 단계" in out and "직접 수락" in out
+    assert sorted(p.name for p in checkout.iterdir()) == [".env.example", "brain", "settings.example.json"]
+
+
+def test_korean_unknown_vision_model_preserves_config_keys():
+    with pytest.raises(core.SetupError) as caught:
+        core.vision_repo("unknown-test-model", lang="ko")
+    message = str(caught.value)
+    assert "지원하지 않습니다" in message
+    assert '"vision": {"model": …}' in message and "unknown-test-model" in message
+
+
 def test_gpu_line_parsing():
     assert core.parse_gpu("NVIDIA GeForce RTX 5080, 16303\n") == ("NVIDIA GeForce RTX 5080", 16303)
     assert core.parse_gpu("NVIDIA GeForce RTX 3060, 12288\nNVIDIA GeForce GT 710, 2048\n") == ("NVIDIA GeForce RTX 3060", 12288)

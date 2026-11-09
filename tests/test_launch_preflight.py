@@ -25,6 +25,19 @@ def free_port():
         return s.getsockname()[1]
 
 
+def test_korean_fatal_error_preserves_original_details(tmp_path):
+    shutil.copy(ROOT / "launch.py", tmp_path / "launch.py")
+    (tmp_path / "scripts").mkdir()
+    shutil.copy(ROOT / "scripts" / "cli_i18n.py", tmp_path / "scripts" / "cli_i18n.py")
+    (tmp_path / "settings.json").write_text("{invalid", encoding="utf-8")
+    result = subprocess.run([sys.executable, str(tmp_path / "launch.py"), "--check", "--lang", "ko"],
+                            capture_output=True, text=True, timeout=15)
+    assert result.returncode == 1
+    assert "시작할 수 없습니다" in result.stderr
+    assert "오류 원문" in result.stderr
+    assert "Expecting property name" in result.stderr
+
+
 def example_cfg(tmp_path):
     cfg = json.loads((ROOT / "settings.example.json").read_text("utf-8"))
     for holder, key in ((cfg, "brain_python"), (cfg, "speech_python"), (cfg["embedder"], "python"), (cfg["vision"], "python")):
@@ -163,9 +176,51 @@ def test_a_voice_server_elsewhere_is_not_checked_for_files(fresh):
     assert got["TTS (voice)"][0] == "warn" and "her voice" not in got
 
 
-def test_check_on_a_fresh_copy_prints_one_line_per_check_and_a_result(tmp_path):
+def test_korean_voice_offline_and_wrong_server_guidance(fresh, monkeypatch):
+    cfg = example_cfg(fresh)
+    monkeypatch.setattr(launch, "http_json", lambda url: None)
+    offline = {name: (level, detail) for level, name, detail in launch.voice_checks(cfg, [], lang="ko")}
+    assert "응답하지 않습니다" in offline["TTS (voice)"][1]
+    assert "services.tts" in offline["TTS (voice)"][1]
+    monkeypatch.setattr(launch, "http_json", lambda url: {})
+    wrong = {name: (level, detail) for level, name, detail in launch.voice_checks(cfg, [], lang="ko")}
+    assert wrong["TTS (voice)"][0] == "err"
+    assert "음성이 없습니다" in wrong["TTS (voice)"][1]
+    assert "settings.json" in wrong["TTS (voice)"][1]
+
+
+def test_korean_service_missing_command_and_folder(fresh, monkeypatch):
+    cfg = example_cfg(fresh)
+    missing = launch.Service("missing", [str(fresh / "not-installed")])
+    folder = launch.Service("folder", [sys.executable], cwd=fresh / "missing-folder")
+    got = checks(launch.preflight(cfg, None, None, None, None, [missing, folder], [], [], lang="ko"))
+    assert "실행 명령이 없습니다" in got["service missing"][1]
+    assert "폴더가 없습니다" in got["service folder"][1]
+
+
+def test_korean_ollama_and_clock_recovery(fresh, monkeypatch):
+    monkeypatch.setattr(launch, "ROOT", fresh)
+    monkeypatch.setattr(launch, "ollama_roles", lambda: {"test-model": ["surface"]})
+    monkeypatch.setattr(launch, "http_json", lambda *args, **kwargs: None)
+    assert "응답하지 않습니다" in launch.ollama_checks(lang="ko")[0][2]
+    level, detail = launch.her_clock(lang="ko")
+    assert level == "warn" and "읽을 수 없어" in detail and "Asia/Tokyo" in detail
+
+
+def test_korean_agent_and_safety_guidance(fresh, monkeypatch):
+    cfg = example_cfg(fresh)
+    monkeypatch.setattr(launch, "http_json", lambda *args, **kwargs: None)
+    tools = tools_with("hermes", {"autostart": {"command": str(fresh / "absent-agent")}})
+    services, held, agents = launch.start_plan(cfg, tools)
+    got = checks(launch.preflight(cfg, None, None, tools, None, services, agents, [], lang="ko", held_iot=held))
+    assert "실행 명령이 없습니다" in got["agent hermes"][1]
+    assert '"autostart"' in got["agent hermes"][1]
+
+
+@pytest.mark.parametrize("lang", ["en", "ko"])
+def test_check_on_a_fresh_copy_prints_one_line_per_check_and_a_result(tmp_path, lang):
     """The real command, on a copy of the checkout with settings.json and nothing installed."""
-    for rel in ("launch.py", "brain/iot_disclaimer.py", "brain/embed_server.py", "config/build_f.json",
+    for rel in ("launch.py", "scripts/cli_i18n.py", "brain/iot_disclaimer.py", "brain/embed_server.py", "config/build_f.json",
                 "config/llm_roles.json", "config/word_replace.json"):
         (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(ROOT / rel, tmp_path / rel)
@@ -176,14 +231,15 @@ def test_check_on_a_fresh_copy_prints_one_line_per_check_and_a_result(tmp_path):
     cfg["vision"]["port"] = free_port()
     cfg["messengers_port"] = free_port()
     (tmp_path / "settings.json").write_text(json.dumps(cfg), "utf-8")
-    p = subprocess.run([sys.executable, "-B", "-X", "utf8", str(tmp_path / "launch.py"), "--check"], cwd=tmp_path,
+    p = subprocess.run([sys.executable, "-B", "-X", "utf8", str(tmp_path / "launch.py"), "--check", "--lang", lang], cwd=tmp_path,
                        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=240)
     out = p.stdout
     assert p.returncode == 1, out + p.stderr
     assert "could not start" not in out + p.stderr
     assert "  !! brain python" in out and "  !! her voice" in out and "  !! Live2D model" in out
     assert "  -- API keys" in out
-    assert out.rstrip().endswith("result: fix the !! lines above (-- lines are informational)")
+    assert out.rstrip().endswith("result: fix the !! lines above (-- lines are informational)" if lang == "en" else
+                                 "결과: 위의 !! 항목을 해결하세요 (-- 항목은 참고 정보입니다)")
     assert (tmp_path / "logs" / "preflight.json").is_file()
 
 

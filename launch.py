@@ -47,6 +47,7 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 from urllib.request import urlopen
+from scripts.cli_i18n import choose, language_from_args, text as cli_text
 
 ROOT = Path(__file__).resolve().parent
 APP = 'OpenAmika'
@@ -259,11 +260,11 @@ def kill_tree(pid):
             pass
 
 
-def serial_dongle():
+def serial_dongle(lang='en'):
     """The Zigbee dongle's COM port on Windows (Silicon Labs CP210x — the SONOFF Dongle Plus MG24), or
     ('', reason) when there is none / no driver yet."""
     if os.name != 'nt':
-        return '', 'not on Windows'
+        return '', choose(lang, 'not on Windows', 'Windows가 아니므로 자동 COM 포트 점검을 지원하지 않습니다')
     script = ("$p = Get-CimInstance Win32_SerialPort -EA SilentlyContinue | Where-Object { $_.PNPDeviceID -like 'USB\\VID_10C4&PID_EA60*' } | Select-Object -First 1;"
               "if ($p) { 'PORT ' + $p.DeviceID } else { $d = Get-PnpDevice -PresentOnly -EA SilentlyContinue | Where-Object { $_.InstanceId -like 'USB\\VID_10C4&PID_EA60*' } | Select-Object -First 1;"
               "if ($d) { 'NODRIVER ' + $d.Status } else { 'NONE' } }")
@@ -271,12 +272,13 @@ def serial_dongle():
         out = subprocess.run(['powershell', '-NoProfile', '-Command', script], capture_output=True, text=True,
                              timeout=30, creationflags=NO_WINDOW).stdout.strip()
     except Exception:
-        return '', 'could not query devices'
+        return '', choose(lang, 'could not query devices', '장치를 조회할 수 없습니다')
     if out.startswith('PORT '):
         return out[5:].strip(), ''
     if out.startswith('NODRIVER'):
-        return '', 'plugged in, no COM port — CP210x driver missing (run IoT\\Setup_IoT_admin.bat)'
-    return '', 'no Zigbee dongle (CP210x) found on this PC'
+        return '', choose(lang, 'plugged in, no COM port — CP210x driver missing (run IoT\\Setup_IoT_admin.bat)',
+                          '장치는 연결되었지만 COM 포트가 없습니다. CP210x 드라이버를 설치하세요 (IoT\\Setup_IoT_admin.bat 실행)')
+    return '', choose(lang, 'no Zigbee dongle (CP210x) found on this PC', '이 PC에서 Zigbee 동글 (CP210x)을 찾지 못했습니다')
 
 
 # ── grace: stop an earlier instance of this folder ───────────────────────────────────────
@@ -330,7 +332,7 @@ def ollama_base():
     return url if re.fullmatch(r'https?://[A-Za-z0-9._\-\[\]]+(?::\d{1,5})?', url) else OLLAMA_DEFAULT
 
 
-def ollama_checks():
+def ollama_checks(lang='en'):
     """[(level, name, detail)] when a role runs on Ollama: the server answers (GET /api/version) and every model in
     use is pulled (GET /api/tags). Nothing when no role uses Ollama."""
     models = ollama_roles()
@@ -340,22 +342,24 @@ def ollama_checks():
     version = http_json(base + '/api/version', timeout=3)
     if not isinstance(version, dict) or '_text' in version:
         roles = sorted({r for rs in models.values() for r in rs})
-        return [('err', 'Ollama', f'not answering at {base} — start Ollama (or fix its address on Setup → Brain); '
-                                  f'{", ".join(roles)} run{"s" if len(roles) == 1 else ""} on it')]
+        return [('err', 'Ollama', choose(lang,
+            f'not answering at {base} — start Ollama (or fix its address on Setup → Brain); {", ".join(roles)} run{"s" if len(roles) == 1 else ""} on it',
+            f'{base}에서 응답하지 않습니다. Ollama를 시작하거나 설정 → 대화 모델에서 주소를 수정하세요. 사용하는 역할: {", ".join(roles)}'))]
     tags = http_json(base + '/api/tags', timeout=5)
     pulled = {str(m.get('name') or m.get('model') or '') for m in (tags or {}).get('models') or [] if isinstance(m, dict)} \
         if isinstance(tags, dict) else set()
-    out = [('ok', 'Ollama', f"{version.get('version') or '?'} at {base}")]
+    out = [('ok', 'Ollama', choose(lang, '{version} at {base}', '{base} · 버전 {version}', version=version.get('version') or '?', base=base))]
     for model, roles in models.items():
         if model in pulled:
-            out.append(('ok', f'Ollama model {model}', f'pulled · {", ".join(roles)}'))
+            out.append(('ok', f'Ollama model {model}', choose(lang, 'pulled · {roles}', '다운로드됨 · {roles}', roles=', '.join(roles))))
         else:
-            out.append(('err', f'Ollama model {model}', f'not pulled — ollama pull {model} ({", ".join(roles)} '
-                                                       f'run{"s" if len(roles) == 1 else ""} on it)'))
+            out.append(('err', f'Ollama model {model}', choose(lang,
+                f'not pulled — ollama pull {model} ({", ".join(roles)} run{"s" if len(roles) == 1 else ""} on it)',
+                f'다운로드되지 않았습니다. ollama pull {model} 실행 (사용하는 역할: {", ".join(roles)})')))
     return out
 
 
-def her_clock(zone_info=None):
+def her_clock(zone_info=None, lang='en'):
     """(level, detail) for her clock: config/build_f.json "timezone". The brain needs a time-zone database to start at
     all (it builds its fallback zone, Asia/Tokyo, at import), and Windows has none of its own: the tzdata package
     (brain/requirements.txt) is it. zone_info: zoneinfo.ZoneInfo (tests pass a stand-in)."""
@@ -364,7 +368,8 @@ def her_clock(zone_info=None):
     try:
         zone = str(json.loads((ROOT / 'config' / 'build_f.json').read_text('utf-8-sig')).get('timezone') or 'Asia/Tokyo')
     except Exception as error:
-        return 'warn', f'config/build_f.json cannot be read ({error}) — the brain falls back to Asia/Tokyo'
+        return 'warn', choose(lang, 'config/build_f.json cannot be read ({error}) — the brain falls back to Asia/Tokyo',
+                             'config/build_f.json을 읽을 수 없어 Asia/Tokyo를 사용합니다. 원문: {error}', error=error)
     try:
         now = datetime.now(zone_info(zone))
         return 'ok', f'{zone} · {now:%a %H:%M} {now.tzname()}'
@@ -374,9 +379,12 @@ def her_clock(zone_info=None):
         zone_info('Asia/Tokyo')
     except Exception:
         python = shown(sys.executable)
-        return 'err', (f'{python} has no time-zone database (the tzdata package), so the brain cannot start — run the '
-                       f'setup again ({SETUP_CORE}), or {python} -m pip install tzdata')
-    return 'warn', f'build_f.json timezone {zone!r} is not a time zone ({problem}) — the brain falls back to Asia/Tokyo'
+        return 'err', choose(lang,
+            '{python} has no time-zone database (the tzdata package), so the brain cannot start — run the setup again ({setup}), or {python} -m pip install tzdata',
+            '{python}에 시간대 데이터베이스 (tzdata)가 없어 대화 서비스를 시작할 수 없습니다. {setup} 또는 {python} -m pip install tzdata 실행', python=python, setup=SETUP_CORE)
+    return 'warn', choose(lang,
+        'build_f.json timezone {zone!r} is not a time zone ({problem}) — the brain falls back to Asia/Tokyo',
+        'build_f.json의 timezone {zone!r}이 유효하지 않아 Asia/Tokyo를 사용합니다. 원문: {problem}', zone=zone, problem=problem)
 
 
 def messengers_port(cfg):
@@ -849,26 +857,30 @@ def setup_tts_command(cfg):
     return f"{shown(brain) if brain and Path(brain).is_file() else 'python'} {os.path.join('scripts', 'setup_tts.py')}"
 
 
-def voice_folder(folder):
+def voice_folder(folder, lang='en'):
     """(level, detail) for a voice in the voice server's Speakers/ folder: character.json, the weights it names,
     references/emotions.json and its clips."""
     try:
         meta = json.loads((folder / 'character.json').read_text('utf-8-sig'))
     except (OSError, ValueError):
-        return 'err', f'{shown(folder)} is not installed (no character.json)'
+        return 'err', choose(lang, '{folder} is not installed (no character.json)',
+                             '{folder} 음성이 설치되지 않았습니다 (character.json 없음)', folder=shown(folder))
     cid = meta.get('character_id') or folder.name
     for key, default in (('llm_model', f'{cid}.ckpt'), ('vocoder_model', f'{cid}.pth')):
         if not (folder / str(meta.get(key) or default)).is_file():
-            return 'err', f'{shown(folder)}: {meta.get(key) or default} is missing'
+            return 'err', choose(lang, '{folder}: {file} is missing', '{folder}: {file} 파일이 없습니다',
+                                 folder=shown(folder), file=meta.get(key) or default)
     try:
         table = json.loads((folder / 'references' / 'emotions.json').read_text('utf-8-sig'))
     except (OSError, ValueError):
-        return 'err', f'{shown(folder)}: references/emotions.json is missing'
+        return 'err', choose(lang, '{folder}: references/emotions.json is missing',
+                             '{folder}: references/emotions.json 파일이 없습니다', folder=shown(folder))
     tags = {k: v for k, v in table.items() if not str(k).startswith('_') and isinstance(v, dict)}
     clips = sum(1 for v in tags.values() if (folder / 'references' / str(v.get('audio', ''))).is_file())
     if not clips:
-        return 'err', f'{shown(folder)}: no reference clips'
-    return ('ok' if clips == len(tags) else 'warn'), f'{folder.name} · {clips}/{len(tags)} emotion clips'
+        return 'err', choose(lang, '{folder}: no reference clips', '{folder}: 참조 음성 클립이 없습니다', folder=shown(folder))
+    return ('ok' if clips == len(tags) else 'warn'), choose(lang, '{folder} · {clips}/{total} emotion clips',
+        '{folder} · 감정 음성 클립 {clips}/{total}개', folder=folder.name, clips=clips, total=len(tags))
 
 
 def avatar_folders():
@@ -889,13 +901,15 @@ def avatar_folders():
     return out
 
 
-def live2d_models():
+def live2d_models(lang='en'):
     """(level, detail) for the Live2D models she can wear (avatar/models/<name>/ with a .model3.json; an agent
     avatar does not count). None is an error: the Use page's stage stays empty."""
-    found = [f"{folder.name} ({model3.name}, {motions} motions)"
+    found = [choose(lang, '{folder} ({file}, {motions} motions)', '{folder} ({file}, 동작 {motions}개)',
+                    folder=folder.name, file=model3.name, motions=motions)
              for folder, model3, role, motions in avatar_folders() if role != 'agent']
     if not found:
-        return 'err', 'no Live2D model in avatar/models/: the stage stays empty'
+        return 'err', choose(lang, 'no Live2D model in avatar/models/: the stage stays empty',
+                             'avatar/models/에 Live2D 모델이 없습니다. 무대가 빈 상태로 표시됩니다')
     return 'ok', ' · '.join(found)
 
 
@@ -908,7 +922,7 @@ def agents_switched_on(tools):
                for name, scfg in (tools.get('mcpServers') or {}).items())
 
 
-def paper_doll(cfg, tools):
+def paper_doll(cfg, tools, lang='en'):
     """(level, detail) for the paper doll that stands in for her helpers (the first model whose banks.json says
     "role": "agent"; scripts/setup_tts.py installs MekaHime's into avatar/models/Host), or (None, None) when there is
     none and no task agent is on, so nobody misses it."""
@@ -916,12 +930,14 @@ def paper_doll(cfg, tools):
     dolls = [(folder, motions) for folder, _, role, motions in avatar_folders() if role == 'agent']
     if dolls:
         folder, motions = dolls[0]
-        return 'ok', (f'{folder.name} · {motions} motions — ' + ('stands in for her helpers on the Use page' if on else
-                      'shown beside her while a task agent is switched on (Tools page)'))
+        return 'ok', choose(lang, '{folder} · {motions} motions — {detail}', '{folder} · 동작 {motions}개 · {detail}',
+            folder=folder.name, motions=motions, detail=choose(lang, 'stands in for her helpers on the Use page',
+            '사용 화면에서 도우미를 나타냅니다') if on else choose(lang,
+            'shown beside her while a task agent is switched on (Tools page)', '도구 화면에서 작업 에이전트를 켜면 옆에 표시됩니다'))
     if on:
-        return 'warn', (f'a task agent is switched on, but avatar/models/ has no paper doll (a model whose banks.json says '
-                        f'"role": "agent"): her helpers get no stand-in and no speech bubbles on the Use page — run '
-                        f'{setup_tts_command(cfg)} (it installs the paper doll with her Live2D model)')
+        return 'warn', choose(lang,
+            'a task agent is switched on, but avatar/models/ has no paper doll (a model whose banks.json says "role": "agent"): her helpers get no stand-in and no speech bubbles on the Use page — run {setup} (it installs the paper doll with her Live2D model)',
+            '작업 에이전트가 켜져 있지만 avatar/models/에 도우미 아바타가 없습니다 (banks.json의 "role": "agent"). 사용 화면에 도우미와 말풍선이 표시되지 않습니다. {setup} 실행으로 Live2D 모델과 함께 설치하세요', setup=setup_tts_command(cfg))
     return None, None
 
 
@@ -957,7 +973,7 @@ def hermes_home(scfg, agent):
     return next((Path(c) for c in candidates if (Path(c) / '.env').is_file()), None)
 
 
-def hermes_checks(scfg, agent):
+def hermes_checks(scfg, agent, lang='en'):
     """[(level, name, detail)]: does Hermes's API server get a key it accepts, and is it the one she sends? Read from the
     Hermes home's .env (hermes_home); the key itself is never shown."""
     home = hermes_home(scfg, agent)
@@ -975,20 +991,22 @@ def hermes_checks(scfg, agent):
         if re.search(r'(?m)^\s*api_server\s*:', yaml_text):
             return []                     # set in config.yaml (gateway.api_server) instead: not checked here
     if not hermes_key_usable(key):
-        return [('warn', 'hermes key', f'API_SERVER_KEY in {where} is missing, shorter than {HERMES_KEY_MIN} characters or '
-                                       f'a placeholder, so Hermes never opens its API server and she cannot reach it — '
-                                       f'set a long random key there and the same one as HERMES_API_KEY in '
-                                       f'config/tools.json (docs/TOOLS.md, "Set up Hermes Agent")')]
+        return [('warn', 'hermes key', choose(lang,
+            'API_SERVER_KEY in {where} is missing, shorter than {minimum} characters or a placeholder, so Hermes never opens its API server and she cannot reach it — set a long random key there and the same one as HERMES_API_KEY in config/tools.json (docs/TOOLS.md, "Set up Hermes Agent")',
+            '{where}의 API_SERVER_KEY가 없거나 {minimum}자보다 짧거나 예시 값이므로 Hermes API 서버가 열리지 않습니다. 긴 임의 키를 설정하고 config/tools.json의 HERMES_API_KEY에도 같은 값을 설정하세요 (docs/TOOLS.md)', where=where, minimum=HERMES_KEY_MIN))]
     if not ours or ours.upper().startswith('PASTE') or (ours.startswith('<') and ours.endswith('>')):   # a placeholder
-        return [('warn', 'hermes key', f'HERMES_API_KEY in config/tools.json is not set yet: put the API_SERVER_KEY from '
-                                       f'{where} there — Hermes rejects her without it')]
+        return [('warn', 'hermes key', choose(lang,
+            'HERMES_API_KEY in config/tools.json is not set yet: put the API_SERVER_KEY from {where} there — Hermes rejects her without it',
+            'config/tools.json에 HERMES_API_KEY가 없습니다. {where}의 API_SERVER_KEY와 같은 값을 설정하세요. 없으면 Hermes가 요청을 거부합니다', where=where))]
     if key != ours:
-        return [('warn', 'hermes key', f'tools.json HERMES_API_KEY differs from API_SERVER_KEY in {where} — Hermes will '
-                                       f'reject her')]
-    return [('ok', 'hermes key', f'HERMES_API_KEY is the API_SERVER_KEY in {where}')]
+        return [('warn', 'hermes key', choose(lang,
+            'tools.json HERMES_API_KEY differs from API_SERVER_KEY in {where} — Hermes will reject her',
+            'tools.json의 HERMES_API_KEY가 {where}의 API_SERVER_KEY와 달라 Hermes가 요청을 거부합니다', where=where))]
+    return [('ok', 'hermes key', choose(lang, 'HERMES_API_KEY is the API_SERVER_KEY in {where}',
+                                      'HERMES_API_KEY가 {where}의 API_SERVER_KEY와 일치합니다', where=where))]
 
 
-def voice_checks(cfg, services):
+def voice_checks(cfg, services, lang='en'):
     """[(level, name, detail)]: the voice server (installed? running?), her voice files and her Live2D model, each
     with the command that fixes it."""
     out = []
@@ -1000,43 +1018,56 @@ def voice_checks(cfg, services):
     gsv = TTS_ENGINE / 'GPT-SoVITS' / 'GPT_SoVITS'
     missing = [] if not local else (
         ['GPT-SoVITS'] if not (gsv / 'TTS_infer_pack' / 'TTS.py').is_file() else
-        ['its pretrained models'] if any(not (gsv / 'pretrained_models' / p).is_file() for p in TTS_PRETRAINED) else [])
+        [choose(lang, 'its pretrained models', '사전 학습 모델')] if any(not (gsv / 'pretrained_models' / p).is_file() for p in TTS_PRETRAINED) else [])
     voice = str(cfg.get('tts_character') or 'MekaHime_Amika')
     if http_json(tts_url + '/ping') is not None:
         # something answers on her voice port: it is used as it is, so it must be a voice server that has her voice
         listing = http_json(tts_url + '/api/characters')
         voices = listing.get('characters') if isinstance(listing, dict) else None
         if isinstance(voices, dict) and voice in voices:
-            out.append(('ok', 'TTS (voice)', f'{tts_url} answers · voice {voice}'))
+            out.append(('ok', 'TTS (voice)', choose(lang, '{url} answers · voice {voice}',
+                                                  '{url} 응답 정상 · 음성 {voice}', url=tts_url, voice=voice)))
         else:
             port = urlsplit(tts_url).port or tts_url
-            out.append(('err', 'TTS (voice)', f'port {port} answers but has no voice {voice} (another voice server, '
-                                              f"OpenSakura's for one?) — stop it, or move this one to another port: "
-                                              f'tts_url and services.tts (--port, health) in settings.json'))
+            out.append(('err', 'TTS (voice)', choose(lang,
+                "port {port} answers but has no voice {voice} (another voice server, OpenSakura's for one?) — stop it, or move this one to another port: tts_url and services.tts (--port, health) in settings.json",
+                '포트 {port}가 응답하지만 {voice} 음성이 없습니다. 다른 음성 서버인지 확인하세요. 해당 서버를 직접 종료하거나 settings.json의 tts_url 및 services.tts (--port, health)를 다른 포트로 변경하세요',
+                port=port, voice=voice)))
     elif tts is None:
-        out.append(('warn', 'TTS (voice)', f'nothing answers at {tts_url} and no services.tts in settings.json — she will not speak'))
+        out.append(('warn', 'TTS (voice)', choose(lang,
+            'nothing answers at {url} and no services.tts in settings.json — she will not speak',
+            '{url}에서 응답하지 않습니다. settings.json에 services.tts도 없어 음성을 출력할 수 없습니다', url=tts_url)))
     elif local and not exe_ok:
-        out.append(('err', 'TTS (voice)', f'her voice server is not installed — run {fix}'))
+        out.append(('err', 'TTS (voice)', choose(lang, 'her voice server is not installed — run {fix}',
+                                               '음성 서버가 설치되지 않았습니다. {fix} 실행', fix=fix)))
     elif local and missing:
-        out.append(('err', 'TTS (voice)', f'her voice server is incomplete ({missing[0]} missing) — run {fix} again'))
+        out.append(('err', 'TTS (voice)', choose(lang,
+            'her voice server is incomplete ({missing} missing) — run {fix} again',
+            '음성 서버가 불완전합니다 ({missing} 없음). {fix}를 다시 실행하세요', missing=missing[0], fix=fix)))
     elif exe_ok:
-        out.append(('warn', 'TTS (voice)', f'not running — will be started ({shown(tts.cmd[0])})'))
+        out.append(('warn', 'TTS (voice)', choose(lang, 'not running — will be started ({command})',
+            '실행 중이 아닙니다. 정상 실행 시 시작합니다 ({command})', command=shown(tts.cmd[0]))))
     else:
-        out.append(('err', 'TTS (voice)', f'not running and its command is missing: {tts.cmd[0]}'))
+        out.append(('err', 'TTS (voice)', choose(lang, 'not running and its command is missing: {command}',
+            '실행 중이 아니며 실행 명령이 없습니다: {command}', command=tts.cmd[0])))
     if local:
-        level, detail = voice_folder(TTS_ENGINE / 'Speakers' / voice)
-        out.append((level, 'her voice', detail if level == 'ok' else f'{detail} — run {fix} (type yes to accept her license)'))
-    level, detail = live2d_models()
+        level, detail = voice_folder(TTS_ENGINE / 'Speakers' / voice, lang=lang)
+        out.append((level, 'her voice', detail if level == 'ok' else choose(lang,
+            '{detail} — run {fix} (type yes to accept her license)',
+            '{detail}. {fix} 실행 (라이선스를 읽고 동의하는 경우에만 직접 yes 입력)', detail=detail, fix=fix)))
+    level, detail = live2d_models(lang=lang)
     out.append((level, 'Live2D model', detail if level == 'ok' else
-                f'{detail} — run {fix} (her voice and her Live2D model come together)'))
+                choose(lang, '{detail} — run {fix} (her voice and her Live2D model come together)',
+                       '{detail}. {fix} 실행 (음성과 Live2D 모델을 함께 설치합니다)', detail=detail, fix=fix)))
     return out
 
 
 # ── pre-flight ───────────────────────────────────────────────────────────────────────────
 class Report:
-    def __init__(self, printer=None):
+    def __init__(self, printer=None, lang='en'):
         self.checks = []
         self.printer = printer
+        self.lang = lang
 
     def add(self, level, name, detail):
         self.checks.append({'level': level, 'name': name, 'detail': detail})
@@ -1047,17 +1078,18 @@ class Report:
         return sum(1 for c in self.checks if c['level'] == level)
 
     @staticmethod
-    def _folded(parts):
+    def _folded(parts, lang='en'):
         level = max((c['level'] for c in parts), key=lambda lv: LEVEL_RANK.get(lv, 0))
         bad = [f"{c['name']}: {c['detail']}" for c in parts if c['level'] != 'ok']
-        return level, (' · '.join(bad) if bad else 'broker, zigbee2mqtt and the Zigbee dongle are ready')
+        return level, (' · '.join(bad) if bad else choose(lang, 'broker, zigbee2mqtt and the Zigbee dongle are ready',
+                                                       '브로커, zigbee2mqtt 및 Zigbee 동글이 준비되었습니다'))
 
     def fold_iot(self):
         """Collapse the smart-home checks (broker, zigbee2mqtt, dongle) into one 'smart home' line."""
         parts = [c for c in self.checks if c['name'] in IOT_CHECKS]
         if not parts:
             return
-        level, detail = self._folded(parts)
+        level, detail = self._folded(parts, lang=self.lang)
         first = min(self.checks.index(c) for c in parts)
         self.checks = [c for c in self.checks if c['name'] not in IOT_CHECKS]
         self.checks.insert(first, {'level': level, 'name': 'smart home', 'detail': detail, 'parts': parts})
@@ -1102,36 +1134,45 @@ class Report:
                                         ensure_ascii=False, indent=2), 'utf-8')
 
 
-def preflight(cfg, emb, vis, tools, tools_error, services, agents, procs, deep=False, printer=None, held_iot=()):
+def preflight(cfg, emb, vis, tools, tools_error, services, agents, procs, deep=False, printer=None, held_iot=(), lang='en'):
     """held_iot: the smart-home services held back because the IoT safety statement was not accepted."""
-    report = Report(printer)
+    report = Report(printer, lang=lang)
     for label, python in (('brain python', cfg.get('brain_python')), ('speech python', cfg.get('speech_python')),
                           ('embedder python', (emb or {}).get('python')), ('vision python', (vis or {}).get('python'))):
         if python is None:
             continue
         report.add('ok' if Path(python).is_file() else 'err', label, python if Path(python).is_file() else
-                   f'missing: {python} — run {SETUP_CORE} (or fix the path in settings.json)')
+                   choose(lang, 'missing: {python} - run {setup} (or fix the path in settings.json)',
+                          '없음: {python}. {setup} 실행 또는 settings.json의 경로를 수정하세요', python=python, setup=SETUP_CORE))
     local_only = roles_all_local()
     needed = ['speech/models/model.pt', 'config/word_replace.json'] + (['brain/embed_server.py'] if emb else [])
-    hints = {'speech/models/model.pt': f'speech recognition model (SenseVoiceSmall, ~940 MB): run {SETUP_CORE}'}
+    hints = {'speech/models/model.pt': choose(lang,
+        'speech recognition model (SenseVoiceSmall, ~940 MB): run {setup}',
+        '음성 인식 모델 (SenseVoiceSmall, 약 940 MB): {setup} 실행', setup=SETUP_CORE)}
     missing = [p for p in needed if not (ROOT / p).is_file()]
     report.add('ok' if not missing else 'err', 'required files',
-               'all present' if not missing else ', '.join(f'{p} ({hints.get(p, "missing")})' for p in missing))
+               choose(lang, 'all present', '모두 있음') if not missing else
+               ', '.join(f'{p} ({hints.get(p, choose(lang, "missing", "없음"))})' for p in missing))
     env = read_env(ROOT / 'brain' / '.env')
     key = env.get('OPENROUTER_API_KEY', '')
     if key and not key.startswith('sk-or-v1-your'):
         others = [k for k in ('DASHSCOPE_API_KEY', 'GEMINI_API_KEY', 'GROQ_API_KEY', 'CEREBRAS_API_KEY', 'ANTHROPIC_API_KEY') if env.get(k)]
-        report.add('ok', 'API keys', f'OpenRouter key set (…{key[-4:]})' + (f'; also {", ".join(others)}' if others else ''))
+        report.add('ok', 'API keys', choose(lang, 'OpenRouter key set (…{tail})', 'OpenRouter 키 설정됨 (…{tail})', tail=key[-4:]) +
+                   (choose(lang, '; also {others}', '; 추가 키: {others}', others=', '.join(others)) if others else ''))
     elif local_only:
-        report.add('ok', 'API keys', 'no OpenRouter key, none needed: every role runs on Ollama (Setup → Brain)')
+        report.add('ok', 'API keys', choose(lang,
+            'no OpenRouter key, none needed: every role runs on Ollama (Setup → Brain)',
+            'OpenRouter 키가 없지만 필요하지 않습니다. 모든 역할이 Ollama를 사용합니다 (설정 → 대화 모델)'))
     else:
-        report.add('warn', 'API keys', 'no OpenRouter key yet — paste it in the first-run wizard on the Use page (or put '
+        report.add('warn', 'API keys', choose(lang, 'no OpenRouter key yet — paste it in the first-run wizard on the Use page (or put '
                                        'it after OPENROUTER_API_KEY= in brain/.env); until then she cannot answer. '
                                        'Fully local needs a model of 27B or more: switch the roles to Ollama on '
-                                       'Setup → Brain')
-    for level, name, detail in ollama_checks():
+                                       'Setup → Brain',
+            'OpenRouter 키가 없습니다. 사용 화면의 첫 설정 또는 brain/.env의 OPENROUTER_API_KEY= 뒤에 입력하세요. '
+            '키가 없으면 답변할 수 없습니다. 로컬 전용 실행은 설정 → 대화 모델에서 역할을 Ollama로 바꾸세요 (27B 이상 모델 권장)'))
+    for level, name, detail in (ollama_checks() if lang == 'en' else ollama_checks(lang=lang)):
         report.add(level, name, detail)
-    level, detail = her_clock()
+    level, detail = her_clock() if lang == 'en' else her_clock(lang=lang)
     report.add(level, 'her clock', detail)
     taken = listeners()
     names = {p['pid']: p['name'] for p in procs}
@@ -1144,17 +1185,22 @@ def preflight(cfg, emb, vis, tools, tools_error, services, agents, procs, deep=F
             continue
         pid = taken.get(int(port))
         if pid and pid in ours:
-            report.add('ok', label, f'{port} held by this OpenAmika (running)')
+            report.add('ok', label, choose(lang, '{port} held by this OpenAmika (running)',
+                                          '{port} 이 OpenAmika에서 사용 중 (실행 중)', port=port))
         elif pid and names.get(pid, '').lower().startswith('python') and pid in unreadable:
-            report.add('err', label, f'{port} is held by pid {pid} (python.exe) started from an administrator window, which this '
-                                     f'launcher cannot see into or stop — close that window, or run Stop_OpenAmika.bat as administrator, then start again')
+            report.add('err', label, choose(lang,
+                '{port} is held by pid {pid} (python.exe) started from an administrator window, which this launcher cannot see into or stop — close that window, or run Stop_OpenAmika.bat as administrator, then start again',
+                '{port} 사용 중: 관리자 창에서 시작한 pid {pid} (python.exe)를 조회하거나 중지할 수 없습니다. 해당 창을 직접 닫거나 Stop_OpenAmika.bat를 관리자 권한으로 실행한 뒤 다시 시작하세요', port=port, pid=pid))
         elif pid:
-            report.add('err', label, f'{port} is in use by pid {pid} ({names.get(pid, "?")}) — that component cannot start; change settings.json or stop it')
+            report.add('err', label, choose(lang,
+                '{port} is in use by pid {pid} ({name}) - that component cannot start; change settings.json or stop it',
+                '{port} 사용 중: pid {pid} ({name}). 이 구성 요소를 시작할 수 없습니다. settings.json을 수정하거나 해당 프로세스를 확인하세요',
+                port=port, pid=pid, name=names.get(pid, '?')))
         else:
-            report.add('ok', label, f'{port} free')
-    for level, name, detail in voice_checks(cfg, services):
+            report.add('ok', label, cli_text('port_free', lang, port=port))
+    for level, name, detail in voice_checks(cfg, services, lang=lang):
         report.add(level, name, detail)
-    level, detail = paper_doll(cfg, None if tools_error else tools)
+    level, detail = paper_doll(cfg, None if tools_error else tools, lang=lang)
     if level:
         report.add(level, 'paper doll', detail)
     for svc in services:
@@ -1162,18 +1208,19 @@ def preflight(cfg, emb, vis, tools, tools_error, services, agents, procs, deep=F
             continue
         exe_ok = Path(svc.exe).is_file() or bool(shutil.which(svc.cmd[0]))
         if svc.is_up():
-            report.add('ok', f'service {svc.name}', 'already running')
+            report.add('ok', f'service {svc.name}', choose(lang, 'already running', '이미 실행 중입니다'))
         elif not exe_ok:
-            hint = ' — run IoT\\Setup_IoT_admin.bat' if svc.name == 'mqtt' else ''
-            report.add('err', f'service {svc.name}', f'command missing: {svc.cmd[0]}{hint}')
+            hint = choose(lang, ' — run IoT\\Setup_IoT_admin.bat', '. IoT\\Setup_IoT_admin.bat 실행') if svc.name == 'mqtt' else ''
+            report.add('err', f'service {svc.name}', choose(lang, 'command missing: {command}{hint}',
+                       '실행 명령이 없습니다: {command}{hint}', command=svc.cmd[0], hint=hint))
         elif not Path(svc.cwd).is_dir():
-            report.add('err', f'service {svc.name}', f'folder missing: {svc.cwd}')
+            report.add('err', f'service {svc.name}', choose(lang, 'folder missing: {folder}', '폴더가 없습니다: {folder}', folder=svc.cwd))
         else:
-            report.add('warn', f'service {svc.name}', 'not running — will be started')
+            report.add('warn', f'service {svc.name}', choose(lang, 'not running — will be started', '실행 중이 아닙니다. 정상 실행 시 시작합니다'))
     held_servers = []                 # smart-home tool servers switched on but held off by the IoT safety statement
     iot_ok = iot_accepted(tools)
     if tools_error:
-        report.add('err', 'tools', tools_error)
+        report.add('err', 'tools', choose(lang, '{error}', '도구 설정을 읽을 수 없습니다. 원문: {error}', error=tools_error))
     elif tools and tools.get('enabled'):
         for name, scfg in (tools.get('mcpServers') or {}).items():
             if not isinstance(scfg, dict) or not scfg.get('enabled'):
@@ -1187,39 +1234,49 @@ def preflight(cfg, emb, vis, tools, tools_error, services, agents, procs, deep=F
                 env_key, path = AGENT_HEALTH[bridge]
                 base = ((scfg.get('env') or {}).get(env_key) or '').rstrip('/')
                 if base and http_json(base + path) is not None:
-                    report.add('ok', f'agent {name}', f'online at {base}')
+                    report.add('ok', f'agent {name}', choose(lang, 'online at {base}', '{base} 연결됨', base=base))
                 elif agent and not (Path(agent.exe).is_file() or shutil.which(agent.cmd[0])):
-                    report.add('err', f'agent {name}', f'not running, and its start command does not exist: '
-                                                       f'{agent.cmd[0]} — install it, or fix "autostart" in config/tools.json')
+                    report.add('err', f'agent {name}', choose(lang,
+                        'not running, and its start command does not exist: {command} — install it, or fix "autostart" in config/tools.json',
+                        '실행 중이 아니며 실행 명령이 없습니다: {command}. 설치하거나 config/tools.json의 "autostart"를 수정하세요', command=agent.cmd[0]))
                 elif agent:
-                    report.add('warn', f'agent {name}', f'not running — will be started ({agent.cmd[0]})')
+                    report.add('warn', f'agent {name}', choose(lang, 'not running — will be started ({command})',
+                        '실행 중이 아닙니다. 정상 실행 시 시작합니다 ({command})', command=agent.cmd[0]))
                 else:
-                    report.add('err', f'agent {name}', f'not running at {base or "?"} and no autostart configured (Tools page)')
+                    report.add('err', f'agent {name}', choose(lang,
+                        'not running at {base} and no autostart configured (Tools page)',
+                        '{base}에서 실행 중이 아니며 autostart 설정이 없습니다 (도구 화면)', base=base or '?'))
                 if bridge == 'hermes':
-                    for level, check, detail in hermes_checks(scfg, agent):
+                    for level, check, detail in hermes_checks(scfg, agent, lang=lang):
                         report.add(level, check, detail)
             elif name == 'iot':
                 port = int((scfg.get('env') or {}).get('AMIKA_MQTT_PORT') or 1883)
                 mqtt = next((s for s in services if s.name == 'mqtt'), None)
                 if port_open(port):
-                    report.add('ok', 'smart home broker', f'MQTT on port {port}')
+                    report.add('ok', 'smart home broker', choose(lang, 'MQTT on port {port}', '포트 {port}에서 MQTT 실행 중', port=port))
                 elif mqtt:
-                    report.add('warn', 'smart home broker', f'MQTT port {port} closed — will be started')
+                    report.add('warn', 'smart home broker', choose(lang, 'MQTT port {port} closed — will be started',
+                        'MQTT 포트 {port} 닫힘. 정상 실행 시 시작합니다', port=port))
                 else:
-                    report.add('err', 'smart home broker', f'MQTT port {port} closed and no services.mqtt — add mosquitto (IoT\\Setup_IoT_admin.bat)')
-                com, why = serial_dongle()
+                    report.add('err', 'smart home broker', choose(lang,
+                        'MQTT port {port} closed and no services.mqtt — add mosquitto (IoT\\Setup_IoT_admin.bat)',
+                        'MQTT 포트 {port}가 닫혀 있고 services.mqtt가 없습니다. mosquitto를 설치하세요 (IoT\\Setup_IoT_admin.bat)', port=port))
+                com, why = serial_dongle() if lang == 'en' else serial_dongle(lang=lang)
                 report.add('ok' if com else 'err', 'Zigbee dongle', com if com else why)
             else:
-                report.add('ok', f'tool {name}', 'configured (' + ('http' if scfg.get('url') else 'stdio') + ')')
+                report.add('ok', f'tool {name}', choose(lang, 'configured ({transport})', '설정됨 ({transport})',
+                           transport='http' if scfg.get('url') else 'stdio'))
     else:
-        report.add('ok', 'tools', 'tool layer disabled' if tools is not None
-                   else 'tool layer off (no config/tools.json yet; the Tools page creates it)')
+        report.add('ok', 'tools', choose(lang, 'tool layer disabled', '도구 기능 사용 안 함') if tools is not None
+                   else choose(lang, 'tool layer off (no config/tools.json yet; the Tools page creates it)',
+                               '도구 기능 꺼짐 (config/tools.json이 없으며, 도구 화면에서 생성합니다)'))
     if held_iot or held_servers:
         rules = iot_rules()
         what = ', '.join([*(s.name for s in held_iot), *held_servers])
-        report.add('warn', IOT_STATEMENT_CHECK,
-                   f'not accepted (version {rules.IOT_DISCLAIMER_VERSION if rules else "?"}): {what} held off — turn '
-                   f'IoT on from the Tools page to read and accept docs/IOT_DISCLAIMER.md')
+        report.add('warn', IOT_STATEMENT_CHECK, choose(lang,
+                   'not accepted (version {version}): {what} held off — turn IoT on from the Tools page to read and accept docs/IOT_DISCLAIMER.md',
+                   '안전 고지에 동의하지 않았습니다 (버전 {version}). {what} 실행 보류. 도구 화면에서 IoT 안전 고지를 읽고 동의 여부를 직접 결정하세요 (docs/IOT_DISCLAIMER.md)',
+                   version=rules.IOT_DISCLAIMER_VERSION if rules else '?', what=what))
     if deep:
         for key, packages in (
             ('brain_python', ['flask', 'flask_cors', 'flask_socketio', 'requests', 'dotenv', 'google.genai', 'tzdata']),
@@ -1231,9 +1288,10 @@ def preflight(cfg, emb, vis, tools, tools_error, services, agents, procs, deep=F
                 continue                              # its own row already says it is missing
             try:
                 out = subprocess.run([cfg[key], '-c', code], capture_output=True, text=True, timeout=120, creationflags=NO_WINDOW).stdout.strip()
-                report.add('ok' if not out else 'err', f'{key} imports', 'all importable' if not out else f'missing modules: {out}')
+                report.add('ok' if not out else 'err', f'{key} imports', choose(lang, 'all importable', '모두 가져오기 가능') if not out else
+                           choose(lang, 'missing modules: {modules}', '누락 모듈: {modules}', modules=out))
             except Exception as error:
-                report.add('err', f'{key} imports', f'could not run: {error}')
+                report.add('err', f'{key} imports', choose(lang, 'could not run: {error}', '실행할 수 없습니다. 원문: {error}', error=error))
         for label, block, cmd in (('embedder check', emb, ['brain/embed_server.py', '--check', '--model', (emb or {}).get('model', '')]),
                                   ('vision check', vis, ['vision/vlm_service.py', '--check'])):
             if not block or not Path(block['python']).is_file():
@@ -1242,21 +1300,24 @@ def preflight(cfg, emb, vis, tools, tools_error, services, agents, procs, deep=F
                 result = subprocess.run([block['python'], '-X', 'utf8', str(ROOT / cmd[0]), *cmd[1:]], capture_output=True,
                                         text=True, encoding='utf-8', errors='replace', timeout=300, creationflags=NO_WINDOW)
             except (OSError, subprocess.SubprocessError) as error:
-                report.add('err', label, f'could not run {block["python"]}: {error} — run {SETUP_CORE}')
+                report.add('err', label, choose(lang, 'could not run {python}: {error} — run {setup}',
+                    '{python} 실행 실패. {setup} 실행으로 설치 상태를 확인하세요. 원문: {error}', python=block['python'], error=error, setup=SETUP_CORE))
                 continue
             # its last line says it all (a traceback ends with the error); long paths are cut at the end, not the start
             lines = [ln.strip() for ln in (result.stdout or result.stderr or '').splitlines() if ln.strip()]
             text = fit(lines[-1], 240) if lines else 'ok'
             if result.returncode != 0:
                 if TOO_LONG.search(result.stdout + result.stderr):
-                    report.add('err', label, f'{text} — the folder path is too long for Windows: move OpenAmika to a '
-                                             'short folder such as C:\\OpenAmika and run the setup there')
+                    report.add('err', label, choose(lang,
+                        '{error} — the folder path is too long for Windows: move OpenAmika to a short folder such as C:\\OpenAmika and run the setup there',
+                        'Windows 경로가 너무 깁니다. C:\\OpenAmika 같은 짧은 폴더로 옮긴 뒤 설치를 다시 실행하세요. 원문: {error}', error=text))
                 else:
-                    report.add('err', label, f'{text} — run {SETUP_CORE}')
+                    report.add('err', label, choose(lang, '{error} — run {setup}', '{setup} 실행으로 복구하세요. 원문: {error}', error=text, setup=SETUP_CORE))
             elif 'not cached yet' in text:
-                report.add('warn', label, f'{text} (or run {SETUP_CORE} to download it now)')
+                report.add('warn', label, choose(lang, '{error} (or run {setup} to download it now)',
+                    '모델이 아직 캐시에 없습니다. {setup} 실행 시 다운로드합니다. 원문: {error}', error=text, setup=SETUP_CORE))
             else:
-                report.add('ok', label, text)
+                report.add('ok', label, choose(lang, '{result}', '점검 완료. 원문: {result}', result=text))
     report.fold_iot()
     return report
 
@@ -1425,11 +1486,14 @@ def write_instance(all_services):
         ensure_ascii=False, indent=2), 'utf-8')
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
-    parser.add_argument('--check', action='store_true', help='validate config, environments, imports and files; start nothing')
-    parser.add_argument('--no-browser', action='store_true')
-    args = parser.parse_args()
+def main(argv=None):
+    lang = language_from_args(argv)
+    parser = argparse.ArgumentParser(description=choose(lang, __doc__.split('\n\n')[0],
+                                                        'OpenAmika 실행 및 설치 상태 점검'))
+    parser.add_argument('--lang', choices=('en', 'ko'), default='en', help=cli_text('language', lang))
+    parser.add_argument('--check', action='store_true', help=cli_text('check', lang))
+    parser.add_argument('--no-browser', action='store_true', help=choose(lang, 'do not open the browser', '브라우저를 자동으로 열지 않습니다'))
+    args = parser.parse_args(argv)
     enable_vt()
     try:
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -1437,8 +1501,8 @@ def main():
         pass
     settings_path = ROOT / 'settings.json'
     if not settings_path.is_file():
-        raise RuntimeError(f'settings.json not found — run the setup first: {SETUP_CORE} (README, "Set her up"); it '
-                           'creates settings.json')
+        raise RuntimeError(choose(lang, 'settings.json not found - run the setup first: {setup}; it creates settings.json',
+                                  'settings.json이 없습니다. 먼저 {setup} 실행으로 설정 파일을 만드세요 (README.ko.md 참고)', setup=SETUP_CORE))
     cfg = json.loads(settings_path.read_text(encoding='utf-8-sig'))
     # interpreter paths may be relative to this folder (envs\brain\Scripts\python.exe from scripts/setup_core.py)
     for holder in (cfg, cfg.get('embedder') or {}, cfg.get('vision') or {}):
@@ -1450,7 +1514,7 @@ def main():
     ports = ([int(cfg['brain_port']), int(cfg['chat_port']), messengers_port(cfg)] + ([int(emb['port'])] if emb else [])
              + ([int(vis['port'])] if vis else []))
     if len(set(ports)) != len(ports) or any(not 1024 <= p <= 65535 for p in ports):
-        raise RuntimeError('Use distinct ports between 1024 and 65535.')
+        raise RuntimeError(choose(lang, 'Use distinct ports between 1024 and 65535.', '1024~65535 범위에서 서로 다른 포트를 사용하세요.'))
     tools, tools_error = load_tools()
     # the MQTT broker and zigbee2mqtt wait for the IoT safety statement to be accepted (Tools page)
     services, held_iot, agents = start_plan(cfg, tools)
@@ -1463,13 +1527,12 @@ def main():
         def printer(level, name, detail):
             mark = marks.get(level, '--')
             print(f"  {COLOR.get(level, '') + mark + RESET if color else mark} {name:<22} {detail}")
-        print(f'{APP} pre-flight  {ROOT}')
+        print(choose(lang, '{app} pre-flight  {root}', '{app} 실행 전 점검  {root}', app=APP, root=ROOT))
         report = preflight(cfg, emb, vis, tools, tools_error, services, agents, list_processes(), deep=True, printer=printer,
-                           held_iot=held_iot)
+                           held_iot=held_iot, lang=lang)
         report.save()
-        print(f"  {report.count('ok')} ok · {report.count('warn')} warning(s) · {report.count('err')} problem(s). "
-              "No models loaded and no API requests made.")
-        print('result: ready' if not report.count('err') else 'result: fix the !! lines above (-- lines are informational)')
+        print('  ' + cli_text('check_summary', lang, ok=report.count('ok'), warn=report.count('warn'), err=report.count('err')))
+        print(cli_text('ready' if not report.count('err') else 'not_ready', lang))
         sys.exit(1 if report.count('err') else 0)
 
     cores = core_services(cfg, emb, vis)
@@ -1625,5 +1688,6 @@ if __name__ == '__main__':
     try:
         main()
     except Exception as error:
-        print(f'{APP} could not start: {error}', file=sys.stderr)
+        print(choose(language_from_args(), '{app} could not start: {error}',
+                     '{app}를 시작할 수 없습니다. 오류 원문: {error}', app=APP, error=error), file=sys.stderr)
         sys.exit(1)

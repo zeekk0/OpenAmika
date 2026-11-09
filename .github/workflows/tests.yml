@@ -38,3 +38,28 @@ jobs:
           TEMP: ${{ runner.temp }}
           TMP: ${{ runner.temp }}
         run: python -B -m pytest tests -k "not live" -p no:cacheprovider -q
+
+  korean-imports:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    env:
+      PYTHONUTF8: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install pinned scientific dependency wheels
+        run: >-
+          python -m pip install --only-binary=:all: numpy==1.26.4 scipy==1.17.1
+      - name: Import scientific dependencies with the verification guard active
+        shell: python -I -B {0}
+        run: |
+          import runpy
+          probe = runpy.run_path("scripts/korean_voice_probe.py")
+          probe["install_verification_guard"]()
+          import numpy.testing
+          import scipy.sparse
+          assert not numpy.testing._private.utils._SUPPORTS_SVE
+          assert not probe["_DENIED"]

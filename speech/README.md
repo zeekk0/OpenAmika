@@ -17,6 +17,18 @@ it in the speech environment; it binds to 127.0.0.1.
 | `stt_carry.py` | carries a force-committed STT segment into the next turn |
 | `static/flow.html` | the interactive architecture map at `/flow` |
 
+## Korean conversation routing
+
+The gateway recognizes Hangul (including decomposed and compatibility-jamo input), preserves `reply_lang: "ko"`,
+and sends `language: "Korean"` for dialogue and Korean-only `/api/tts_say` requests. Korean short replies are not
+discarded as English noise. Camera context and noise-interruption placeholders have Korean forms. Korean uses
+the explicit `DEFAULT_PAUSE` rather than the Chinese row in the three-column emotion pause table.
+
+SenseVoice's existing automatic recognition path is unchanged. Offline tests cover Unicode preservation, carry,
+anchors, parser chunk boundaries, routing and voice failure handling, not actual Korean microphone accuracy or
+synthesis quality. Korean voice remains experimental, with a separate optional no-install capability check in
+`scripts/setup_tts.py --verify`. See [TTS status](../docs/TTS.md#korean-voice-status).
+
 ## Environment (set by launch.py from settings.json)
 
 | variable | default | |

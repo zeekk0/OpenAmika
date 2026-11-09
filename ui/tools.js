@@ -1,9 +1,40 @@
 /* OpenAmika — Tools page: her agents & MCP servers, consent settings, jobs, approvals, call log. */
 (function () {
   "use strict";
-  const { nav, footer, toast, getJSON, postAction, el } = window.OA;
+  const { nav, footer, toast, getJSON, postAction, el: makeElement } = window.OA;
+  const t = (key, params) => window.OAI18n.t(key, params);
+  const bindings = new Map();
+  function text(node, render) {
+    bindings.set(node, render);
+    node.textContent = render();
+    return node;
+  }
+  function el(tag, attrs = {}, ...children) {
+    const { i18n, render, ...rest } = attrs;
+    const node = makeElement(tag, rest, ...children);
+    if (i18n || render) text(node, render || (() => t(i18n)));
+    return node;
+  }
+  const dateNote = (date) => date ? t("tools.onDate", { date: new Date(date).toLocaleString(window.OAI18n.getLocale()) }) : "";
   nav("tools"); footer();
   const $ = (id) => document.getElementById(id);
+  window.OAI18n.translate();
+  for (const [id, key] of Object.entries({ iotSub: "checking", iotConsentState: "consentOff",
+    iotPairNote: "pairHint", addTargetLabel: "command", iotConsentVersion: "versionPending",
+    iotConsentLead: "consentLead", iotConsentCancel: "cancel" })) text($(id), () => t("tools." + key));
+  function pruneBindings() {
+    for (const node of bindings.keys()) if (!node.isConnected) bindings.delete(node);
+  }
+  window.addEventListener("oa:localechange", () => {
+    // Labels only: no config application, network requests, form replacement or consent side effects.
+    pruneBindings();
+    for (const [node, render] of bindings) node.textContent = render();
+    if ($("iotConsent").open && !consent.manualLanguage) {
+      const scroll = $("iotConsentText").scrollTop;
+      showStatement(window.OAI18n.getLocale());
+      $("iotConsentText").scrollTop = scroll;
+    }
+  });
 
   let state = null;        // last GET /api/build_f/tools payload (jobs and approvals are shown on the Use page)
 
@@ -92,7 +123,7 @@
   // ── the IoT safety statement (docs/IOT_DISCLAIMER.md): IoT turns on only after it was read and accepted ──
   // The brain and the gateway refuse a config that switches a smart-home server on before that (409, code
   // iot_disclaimer_required); this page asks first, and answers such a refusal with the same dialog.
-  const consent = { doc: null, resolve: null, promise: null, mode: null, autoShown: false };
+  const consent = { doc: null, resolve: null, promise: null, mode: null, autoShown: false, manualLanguage: false };
 
   function iotAccepted() { return !!(state && state.iot_disclaimer && state.iot_disclaimer.accepted); }
   function isSmartHome(name) { return !!(state && state.servers && state.servers[name] && state.servers[name].iot); }
@@ -130,28 +161,26 @@
     if (dialog.open) return mode !== "view" && consent.mode === "accept" ? consent.promise : false;
     try { consent.doc = await getJSON("/api/build_f/iot/disclaimer"); }
     catch (error) {
-      toast("The IoT safety statement could not be loaded, so IoT stays off: " + (error.message || error), true);
+      toast(t("tools.loadStatementError", { error: error.message || error }), true);
       return null;
     }
     if (dialog.open) return false;
     const doc = consent.doc, accepting = mode !== "view";
     consent.mode = accepting ? "accept" : "view";
-    $("iotConsentVersion").textContent = "Version " + doc.version;
-    $("iotConsentLead").textContent = accepting
-      ? "Before Amika can reach anything in your home, read this statement in full. IoT stays off unless you accept it."
-      : doc.accepted ? "You accepted this version" + (doc.accepted_at ? " on " + new Date(doc.accepted_at).toLocaleString() : "") + "."
-        : "IoT stays off until you accept this statement; turning IoT on asks for it.";
+    consent.manualLanguage = false;
+    text($("iotConsentVersion"), () => t("tools.version", { version: doc.version }));
+    text($("iotConsentLead"), () => accepting ? t("tools.consentLead")
+      : doc.accepted ? t("tools.acceptedView", { date: dateNote(doc.accepted_at) }) : t("tools.viewOff"));
     const changed = $("iotConsentChanged");
     changed.hidden = !(accepting && doc.accepted_version && doc.accepted_version !== doc.version);
-    changed.textContent = "This statement changed since you accepted version " + doc.accepted_version
-      + ". IoT stays off until you read and accept the new version.";
+    text(changed, () => t("tools.changed", { version: doc.accepted_version }));
     $("iotConsentAccept").hidden = !accepting;
     $("iotConsentEnable").hidden = !accepting;
-    $("iotConsentCancel").textContent = accepting ? "Cancel" : "Close";
+    text($("iotConsentCancel"), () => t(accepting ? "tools.cancel" : "tools.close"));
     $("iotConsentCheck").checked = false;
     $("iotConsentEnable").disabled = true;
     $("iotConsentError").hidden = true;
-    showStatement("en");
+    showStatement(window.OAI18n.getLocale());
     dialog.showModal();
     $("iotConsentText").focus();
     consent.promise = new Promise((resolve) => { consent.resolve = resolve; });
@@ -171,7 +200,10 @@
   $("iotConsentCancel").addEventListener("click", () => closeConsent(false));
   $("iotConsent").addEventListener("cancel", (event) => { event.preventDefault(); closeConsent(false); });   // Escape
   $("iotConsent").addEventListener("close", () => { if (consent.resolve) closeConsent(false); });
-  document.querySelectorAll(".oa-consent-lang").forEach((b) => b.addEventListener("click", () => showStatement(b.dataset.lang)));
+  document.querySelectorAll(".oa-consent-lang").forEach((b) => b.addEventListener("click", () => {
+    consent.manualLanguage = true;
+    showStatement(b.dataset.lang);
+  }));
   $("iotConsentEnable").addEventListener("click", async () => {
     const button = $("iotConsentEnable");
     if (!$("iotConsentCheck").checked || !consent.doc) return;
@@ -184,7 +216,7 @@
     } catch (error) {
       const box = $("iotConsentError");
       box.hidden = false;
-      box.textContent = "Not recorded, IoT stays off: " + (error.message || error);
+      text(box, () => t("tools.recordError", { error: error.message || error }));
       button.disabled = !$("iotConsentCheck").checked;
     }
   });
@@ -194,23 +226,21 @@
     if (!c) return;
     const held = !c.accepted && Array.isArray(c.held) && c.held.length > 0;
     $("iotSafety").classList.toggle("held", held);
-    $("iotConsentState").textContent = c.accepted
-      ? "IoT safety statement version " + c.version + " accepted" + (c.accepted_at ? " on " + new Date(c.accepted_at).toLocaleString() : "") + "."
+    text($("iotConsentState"), () => c.accepted
+      ? t("tools.acceptedState", { version: c.version, date: dateNote(c.accepted_at) })
       : held && c.accepted_version
-        ? "IoT is off: the IoT safety statement changed (you accepted version " + c.accepted_version + "; the current one is "
-          + c.version + "). Read it and accept it to turn IoT back on."
-        : held ? "IoT is off: " + c.held.join(", ") + " is switched on, but the IoT safety statement (version " + c.version
-          + ") has not been accepted yet. Read it and accept it to turn IoT on."
-          : "Turning IoT on shows the IoT safety statement first; IoT stays off unless you accept it.";
+        ? t("tools.heldChanged", { old: c.accepted_version, version: c.version })
+        : held ? t("tools.held", { servers: c.held.join(", "), version: c.version }) : t("tools.consentOff"));
     const button = $("iotConsentOpen");
-    button.textContent = held ? "Read and accept…" : "Read the IoT safety statement";
+    button.removeAttribute("data-i18n");
+    text(button, () => t(held ? "tools.readAccept" : "tools.readStatement"));
     button.classList.toggle("primary", held);
     button.dataset.mode = held ? "accept" : "view";
   }
 
   async function acceptHeld() {
     if (await openConsent("accept")) {
-      toast("IoT safety statement accepted — IoT is on.");
+      toast(t("tools.acceptedToast"));
       refresh();
       iotRefresh();
     }
@@ -226,7 +256,7 @@
     const accepted = await openConsent("accept");
     if (accepted) return true;
     if (state) renderServers(state);
-    if (accepted === false) toast("Nothing saved: IoT stays off.");
+    if (accepted === false) toast(t("tools.nothingSaved"));
     return false;
   }
 
@@ -241,7 +271,7 @@
       result = await postAction("/api/build_f/tools/config", "tools-config", { config: cfg });
     }
     apply(result);
-    toast("Tool settings saved.");
+    toast(t("tools.savedSettings"));
   }
 
   function apply(s) {
@@ -264,6 +294,7 @@
     }
     renderServers(s);
     renderLog(s);
+    pruneBindings();
   }
 
   function renderServers(s) {
@@ -272,7 +303,7 @@
     const entries = Object.entries(s.servers || {});
     if (!entries.length) {
       box.append(el("section", { class: "tech-card" },
-        el("div", { class: "card-hint", text: "No servers yet. To connect Hermes Agent or nanoMuse, copy config/tools.example.json to config/tools.json and fill in its hermes or nanomuse entry (README, “Her helpers”; docs/TOOLS.md has every step), then reload this page — or switch to Professional (top right) to add a server here. The smart-home server lives in servers/openamika-iot." })));
+        el("div", { class: "card-hint", i18n: "tools.noServers" })));
       return;
     }
     for (const [name, server] of entries) {
@@ -280,7 +311,7 @@
       const toggle = el("input", { type: "checkbox", "data-server-toggle": name });
       // a smart-home server held off by the IoT safety statement shows as off: it is off until the statement is accepted
       toggle.checked = !!server.enabled && !server.blocked;
-      toggle.addEventListener("change", () => save(mergedConfig()).catch((e) => toast(String(e.message || e), true)));
+      toggle.addEventListener("change", () => save(mergedConfig()).catch((e) => toast(t("tools.actionError", { error: e.message || e }), true)));
       // dot: grey = disabled · amber = enabled but the bridge is not up · red = bridge up, the agent itself unreachable · green = all good
       const health = server.health || null;
       const agentDown = !!(server.connected && health && health.ok === false);
@@ -295,63 +326,59 @@
       const head = el("div", { class: "server-head" },
         el("span", { class: "dot " + (!server.enabled ? "" : !server.connected ? "warn" : starting ? "warn" : agentDown ? "err" : "ok") }),
         el("span", { class: "name", text: name }),
-        el("span", { class: "tag", text: server.kind === "agent" ? "agent" : server.transport }),
+        el("span", { class: "tag", render: () => server.kind === "agent" ? t("tools.agent") : server.transport }),
         health ? el("span", { class: "tag", style: starting ? "color:var(--warn);" : agentDown ? "color:var(--err);" : "",
-          text: starting ? "agent starting…" : startFailed ? "start failed" : refusing ? "agent refusing tasks"
-            : noModel ? "agent has no model" : agentDown ? "agent unreachable"
-            : "agent online" + (health.version ? " · v" + health.version : "") }) : "",
+          render: () => t(starting ? "tools.agentStarting" : startFailed ? "tools.startFailed" : refusing ? "tools.refusing"
+            : noModel ? "tools.noModel" : agentDown ? "tools.unreachable" : "tools.online") + (!agentDown && health.version ? " · v" + health.version : "") }) : "",
         canStart ? el("button", {
-          class: "btn small primary", text: "Start",
+          class: "btn small primary", i18n: "tools.start",
           onclick: async (event) => {
             event.preventDefault();
-            toast("Starting " + name + "…");
+            toast(t("tools.starting", { name }));
             try {
               const result = await postAction("/api/build_f/tools/start", "tools-start", { server: name });
-              toast(result.started ? name + " launched — the card turns green when it answers." : name + ": " + ((result.health || {}).detail || "not started"), !result.started);
+              toast(result.started ? t("tools.launched", { name }) : name + ": " + ((result.health || {}).detail || t("tools.notStarted")), !result.started);
               refresh();
-            } catch (error) { toast(name + ": " + (error.message || error), true); }
+            } catch (error) { toast(t("tools.actionError", { error: name + ": " + (error.message || error) }), true); }
           },
         }) : "",
         el("span", { class: "target mono", text: server.target || "" }),
         el("label", { class: "switch" }, toggle, el("span", { class: "track" })),
         el("button", {
-          class: "btn small", text: "Test",
+          class: "btn small", i18n: "tools.test",
           onclick: async (event) => {
             event.preventDefault();
-            toast("Connecting " + name + "…");
+            toast(t("tools.connecting", { name }));
             try {
               const result = await postAction("/api/build_f/tools/test", "tools-test", { server: name });
               const h = result.health;
-              const agentNote = h ? (h.ok ? " · agent online" + (h.version ? " v" + h.version : "") : " · agent UNREACHABLE: " + (h.detail || "")) : "";
-              toast(name + ": " + (result.tools || []).length + " tool(s) discovered" + (result.kind === "agent" ? " (agent bridge)" : "") + agentNote + ".", !!(h && !h.ok));
+              const agentNote = h ? (h.ok ? t("tools.agentOnlineNote") + (h.version ? " v" + h.version : "") : t("tools.agentOfflineNote", { detail: h.detail || "" })) : "";
+              toast(t("tools.discovered", { name, count: (result.tools || []).length, agent: result.kind === "agent" ? t("tools.agentBridge") : "", health: agentNote }), !!(h && !h.ok));
               refresh();
-            } catch (error) { toast(name + ": " + (error.message || error), true); }
+            } catch (error) { toast(t("tools.actionError", { error: name + ": " + (error.message || error) }), true); }
           },
         }),
         el("button", {
-          class: "btn small danger", text: "Remove", "data-pro": "",   // deleting a server from tools.json: Professional only
+          class: "btn small danger", i18n: "tools.remove", "data-pro": "",   // deleting a server from tools.json: Professional only
           onclick: async (event) => {
             event.preventDefault();
-            if (!window.confirm("Remove server '" + name + "' from tools.json?")) return;
+            if (!window.confirm(t("tools.removeConfirm", { name }))) return;
             const cfg = mergedConfig();
             delete cfg.mcpServers[name];
-            save(cfg).catch((e) => toast(String(e.message || e), true));
+            save(cfg).catch((e) => toast(t("tools.actionError", { error: e.message || e }), true));
           },
         }));
       card.append(head);
       if (server.blocked) card.append(el("div", { class: "card-hint", style: "color:var(--warn);margin-top:8px;",
-        text: "Switched on in tools.json, but held off until the IoT safety statement is accepted (Smart Home and IoT card)." }));
+        i18n: "tools.blocked" }));
       else if (server.error) card.append(el("div", { class: "card-hint", style: "color:var(--err);margin-top:8px;", text: server.error }));
-      if (starting) card.append(el("div", { class: "card-hint", style: "margin-top:8px;", text: (health.detail || "starting…") + " — this card updates by itself." }));
+      if (starting) card.append(el("div", { class: "card-hint", style: "margin-top:8px;", render: () => t("tools.startingDetail", { detail: health.detail || t("tools.startingShort") }) }));
       else if (agentDown) card.append(el("div", { class: "card-hint", style: "color:var(--err);margin-top:8px;",
-        text: (health.detail || "The bridge is up but the agent itself does not answer.")
-          + (refusing ? " She is told it is not taking tasks and will not promise it anything."
-            : noModel ? " She is told it cannot do anything until its model is set up, and will not promise it anything."
-            : " She is told it is unreachable and will not promise it anything.") }));
+        render: () => (health.detail || t("tools.bridgeNoAnswer")) + t(refusing ? "tools.refuseHelp" : noModel ? "tools.modelHelp" : "tools.unreachableHelp") }));
       if (health && health.ok && health.note) card.append(el("div", { class: "card-hint", style: "margin-top:8px;", text: health.note }));
       if (server.kind === "agent") {
         const startField = el("div", { class: "field", style: "margin-top:10px;", "data-pro": "" },   // Professional only
-          el("label", { text: "Start command — run automatically when the agent is not running (leave empty to manage it yourself)" }));
+          el("label", { i18n: "tools.startCommand" }));
         const startInput = el("input", { type: "text", class: "mono", "data-autostart": name, spellcheck: "false",
           placeholder: name === "nanomuse" ? "C:\\OpenAmika\\Nanomuse\\venv\\Scripts\\nanomuse.exe serve --config C:\\OpenAmika\\Nanomuse\\data\\config.toml --no-qr --host 127.0.0.1 --port 8787" : "%LOCALAPPDATA%\\hermes\\bin\\hermes.exe gateway" });
         startInput.value = joinCommand(server.autostart);
@@ -360,27 +387,28 @@
       }
       // what she is told about this server (in character, Chinese like the rest of her prompts)
       const noteField = el("div", { class: "field", style: "margin-top:10px;", "data-pro": "" },   // Professional only
-        el("label", { text: "What she knows about it (goes into her prompt when enabled; {user_name} = your name)" }));
+        el("label", { i18n: "tools.personaNote" }));
       const area = el("textarea", { class: "mono", rows: "3", "data-note": name, spellcheck: "false",
-        placeholder: server.kind === "agent" ? "e.g. 赫尔墨斯——{user_name}装在他电脑上的小帮手程序，能替你上网查东西、看他的屏幕、读写邮件、网上下单……" : "e.g. 家里的灯和插座，可以开关、查状态" });
+        placeholder: t(server.kind === "agent" ? "tools.agentExample" : "tools.deviceExample"),
+        "data-i18n-placeholder": server.kind === "agent" ? "tools.agentExample" : "tools.deviceExample" });
       area.value = server.persona_note || "";
       noteField.append(area);
       card.append(noteField);
       if (server.tools && server.tools.length) {
         const table = el("table", { class: "oa-table", style: "margin-top:10px;" });
-        table.append(el("thead", {}, el("tr", {}, el("th", { text: "Tool" }), el("th", { text: "Description" }), el("th", { text: "Policy" }))));
+        table.append(el("thead", {}, el("tr", {}, el("th", { i18n: "tools.tool" }), el("th", { i18n: "tools.description" }), el("th", { i18n: "tools.policy" }))));
         const body = el("tbody");
         for (const tool of server.tools) {
           const select = el("select", { class: "policy-select", "data-policy-server": name, "data-policy-tool": tool.name });
-          for (const policy of ["auto", "confirm", "deny"]) select.append(el("option", { value: policy, text: policy }));
+          for (const policy of ["auto", "confirm", "deny"]) select.append(el("option", { value: policy, i18n: "tools." + policy }));
           select.value = tool.policy || "confirm";
-          select.addEventListener("change", () => save(mergedConfig()).catch((e) => toast(String(e.message || e), true)));
+          select.addEventListener("change", () => save(mergedConfig()).catch((e) => toast(t("tools.actionError", { error: e.message || e }), true)));
           body.append(el("tr", {}, el("td", { text: tool.name }), el("td", { text: (tool.description || "").slice(0, 160) }), el("td", {}, select)));
         }
         table.append(body);
         card.append(el("div", { class: "table-scroll", "data-pro": "" }, table));   // per-tool policies: Professional only
       } else if (server.enabled && !server.blocked) {
-        card.append(el("div", { class: "card-hint", style: "margin-top:8px;", text: "No tools discovered yet — press Test to connect." }));
+        card.append(el("div", { class: "card-hint", style: "margin-top:8px;", i18n: "tools.noTools" }));
       }
       // the smart-home server lives inside the Smart Home and IoT panel, above its devices, without its own card chrome
       if (name === "iot") { card.classList.add("embedded"); $("iotServer").replaceChildren(card); }
@@ -393,43 +421,43 @@
     const log = (s.log || []).slice().reverse();
     body.replaceChildren();
     if (!log.length) {
-      body.append(el("tr", {}, el("td", { colspan: "5", class: "card-hint", text: "No tool calls yet." })));
+      body.append(el("tr", {}, el("td", { colspan: "5", class: "card-hint", i18n: "tools.noCalls" })));
       return;
     }
     for (const entry of log) {
       const when = new Date((entry.ts || 0) * 1000);
       const outcome = entry.ok === null ? "pending" : entry.ok ? "ok"
-        : (entry.policy === "refused" ? "refused" : entry.policy === "unreachable" ? "not sent" : "error");
-      const detail = (entry.result || "").slice(0, 120) + (entry.quote ? "  [you said: " + String(entry.quote).slice(0, 60) + "]" : "");
+        : (entry.policy === "refused" ? "refused" : entry.policy === "unreachable" ? "notSent" : "error");
+      const detail = () => (entry.result || "").slice(0, 120) + (entry.quote ? t("tools.quote", { quote: String(entry.quote).slice(0, 60) }) : "");
       body.append(el("tr", {},
-        el("td", { text: when.toLocaleTimeString() }),
+        el("td", { render: () => when.toLocaleTimeString(window.OAI18n.getLocale()) }),
         el("td", { text: entry.server + "__" + entry.tool }),
         el("td", {}, el("code", { text: JSON.stringify(entry.arguments || {}).slice(0, 80) })),
-        el("td", { text: outcome + (entry.policy === "confirmed" ? " (approved)" : "") }),
-        el("td", { text: detail })));
+        el("td", { render: () => t("tools." + outcome) + (entry.policy === "confirmed" ? t("tools.approved") : "") }),
+        el("td", { render: detail })));
     }
   }
 
-  $("toolsSave").addEventListener("click", () => save(mergedConfig()).catch((e) => toast(String(e.message || e), true)));
+  $("toolsSave").addEventListener("click", () => save(mergedConfig()).catch((e) => toast(t("tools.actionError", { error: e.message || e }), true)));
   $("rawSave").addEventListener("click", () => {
     let raw;
     try { raw = JSON.parse($("rawConfig").value); }
-    catch (error) { toast("Raw config is not valid JSON: " + error.message, true); return; }
-    save(raw).catch((e) => toast(String(e.message || e), true));
+    catch (error) { toast(t("tools.rawError", { error: error.message }), true); return; }
+    save(raw).catch((e) => toast(t("tools.actionError", { error: e.message || e }), true));
   });
 
   $("addTransport").addEventListener("change", () => {
     const http = $("addTransport").value === "http";
-    $("addTargetLabel").textContent = http ? "Server URL" : "Command + args (first word = command)";
+    text($("addTargetLabel"), () => t(http ? "tools.url" : "tools.command"));
     $("addTarget").placeholder = http ? "http://homeassistant.local:8123/mcp_server/sse" : "python -m openamika_agents hermes";
   });
   $("addBtn").addEventListener("click", () => {
     const name = $("addName").value.trim();
     const target = $("addTarget").value.trim();
-    if (!/^[A-Za-z0-9_-]{1,32}$/.test(name)) { toast("Name: letters, digits, - or _ only.", true); return; }
-    if (!target) { toast("Target is required.", true); return; }
+    if (!/^[A-Za-z0-9_-]{1,32}$/.test(name)) { toast(t("tools.invalidName"), true); return; }
+    if (!target) { toast(t("tools.targetRequired"), true); return; }
     const cfg = mergedConfig();
-    if (cfg.mcpServers[name]) { toast("A server with that name exists.", true); return; }
+    if (cfg.mcpServers[name]) { toast(t("tools.exists"), true); return; }
     if ($("addTransport").value === "http") {
       cfg.mcpServers[name] = { url: target, enabled: false };
     } else {
@@ -438,29 +466,29 @@
       if (/openamika_agents/.test(target)) { cfg.mcpServers[name].kind = "agent"; cfg.mcpServers[name].cwd = "../servers/openamika-agents"; }
     }
     save(cfg).then(() => { $("addName").value = ""; $("addTarget").value = ""; })
-      .catch((e) => toast(String(e.message || e), true));
+      .catch((e) => toast(t("tools.actionError", { error: e.message || e }), true));
   });
 
   // ── smart home: the plugs by hand (brain /api/build_f/iot — she reaches the same server through MCP) ──
   const iot = { timer: null, cards: new Map(), permit: false };
-  const iotNum = (v, digits) => (typeof v === "number" && Number.isFinite(v) ? v.toFixed(digits) : null);
+  const iotNum = (v, digits) => (typeof v === "number" && Number.isFinite(v) ? v.toLocaleString(window.OAI18n.getLocale(), { minimumFractionDigits: digits, maximumFractionDigits: digits }) : null);
   function iotAgo(epoch) {
     const s = Math.max(0, Date.now() / 1000 - (Number(epoch) || 0));
-    if (s < 60) return "just now";
-    if (s < 3600) return Math.round(s / 60) + " min ago";
-    if (s < 86400) return Math.round(s / 3600) + " h ago";
-    return Math.round(s / 86400) + " d ago";
+    if (s < 60) return t("tools.justNow");
+    if (s < 3600) return t("tools.minutesAgo", { count: Math.round(s / 60) });
+    if (s < 86400) return t("tools.hoursAgo", { count: Math.round(s / 3600) });
+    return t("tools.daysAgo", { count: Math.round(s / 86400) });
   }
-  const iotClock = (epoch) => new Date((Number(epoch) || 0) * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const iotClock = (epoch) => new Date((Number(epoch) || 0) * 1000).toLocaleTimeString(window.OAI18n.getLocale(), { hour: "2-digit", minute: "2-digit" });
   async function iotPost(url, action, body) {
     try { return await postAction(url, action, body); }
-    catch (error) { toast(String(error.message || error), true); return null; }   // 409 while she speaks: the detail says so, just retry
+    catch (error) { toast(t("tools.actionError", { error: error.message || error }), true); return null; }   // 409 while she speaks: the detail says so, just retry
   }
   function iotLight(d) {                 // [dot class, text to show]
-    if (!d || !d.enabled) return ["", "the smart-home server is off — flip its switch above (Professional mode adds one if it is missing)"];
-    if (d.blocked) return ["warn", "Until the statement is accepted, no smart-home server is started and no device is switched."];
-    if (!d.connected) return ["err", (d.health && d.health.detail) || "not connected"];
-    if (d.health && d.health.ok === false) return ["warn", d.health.detail || d.health.reason || "degraded"];
+    if (!d || !d.enabled) return ["", t("tools.serverOff")];
+    if (d.blocked) return ["warn", t("tools.consentBlocked")];
+    if (!d.connected) return ["err", (d.health && d.health.detail) || t("tools.disconnected")];
+    if (d.health && d.health.ok === false) return ["warn", d.health.detail || d.health.reason || t("tools.degraded")];
     return ["ok", ""];
   }
   // one card per device, built once and updated in place so a nickname being typed survives the refresh
@@ -473,30 +501,31 @@
     const actions = el("div", { class: "iot-actions" });
     const setState = (st) => {
       const s = String(st || "unknown").toUpperCase();
-      state.textContent = s;
+      state.dataset.state = s;
+      text(state, () => t(s === "ON" ? "tools.stateOn" : s === "OFF" ? "tools.stateOff" : "tools.stateUnknown"));
       state.className = "iot-state " + (s === "ON" ? "on" : s === "OFF" ? "off" : "unknown");
     };
     const switchTo = async (action) => {
       actions.querySelectorAll("button").forEach((b) => { b.disabled = true; });
-      setState(action === "toggle" ? (state.textContent === "ON" ? "OFF" : "ON") : action);   // optimistic; the refresh tells the truth
+      setState(action === "toggle" ? (state.dataset.state === "ON" ? "OFF" : "ON") : action);   // optimistic; the refresh tells the truth
       const result = await iotPost("/api/build_f/iot/device", "iot-device", { device: key, action });
       const r = result && result.result;
-      if (r && r.ok === false) toast(r.error || r.message || "The plug did not answer.", true);
+      if (r && r.ok === false) toast(r.error || r.message || t("tools.plugNoAnswer"), true);
       actions.querySelectorAll("button").forEach((b) => { b.disabled = false; });
       iotRefresh();
     };
-    for (const [label, action, cls] of [["On", "on", "btn small primary"], ["Off", "off", "btn small"], ["Toggle", "toggle", "btn small"]]) {
-      actions.append(el("button", { class: cls, type: "button", text: label, onclick: () => switchTo(action) }));
+    for (const [label, action, cls] of [["tools.on", "on", "btn small primary"], ["tools.off", "off", "btn small"], ["tools.toggle", "toggle", "btn small"]]) {
+      actions.append(el("button", { class: cls, type: "button", i18n: label, onclick: () => switchTo(action) }));
     }
-    const nick = el("input", { type: "text", placeholder: "Nickname — what you call it", maxlength: "40" });
-    const note = el("input", { type: "text", placeholder: "What is it? (Amika reads this)", maxlength: "200" });
+    const nick = el("input", { type: "text", placeholder: t("tools.nickname"), "data-i18n-placeholder": "tools.nickname", maxlength: "40" });
+    const note = el("input", { type: "text", placeholder: t("tools.deviceNote"), "data-i18n-placeholder": "tools.deviceNote", maxlength: "200" });
     for (const input of [nick, note]) input.addEventListener("input", () => { card.dataset.dirty = "yes"; });
-    const save = el("button", { class: "btn small", type: "button", text: "Save", onclick: async () => {
+    const save = el("button", { class: "btn small", type: "button", i18n: "tools.save", onclick: async () => {
       const was = card._dev || {};
       let ok = true;
       if (nick.value.trim() !== (was.nickname || "")) ok = !!(await iotPost("/api/build_f/iot/device", "iot-device", { device: key, nickname: nick.value.trim() })) && ok;
       if (note.value.trim() !== (was.note || "")) ok = !!(await iotPost("/api/build_f/iot/device", "iot-device", { device: key, note: note.value.trim() })) && ok;
-      if (ok) { card.dataset.dirty = "no"; toast("Saved — she knows it as “" + (nick.value.trim() || key) + "”."); }
+      if (ok) { card.dataset.dirty = "no"; toast(t("tools.savedName", { name: nick.value.trim() || key })); }
       iotRefresh();
     } });
     card.update = (d) => {
@@ -504,14 +533,14 @@
       name.textContent = d.nickname || d.friendly_name;
       sub.textContent = [d.vendor, d.model].filter(Boolean).join(" ") + (d.description ? " — " + d.description : "");
       setState(d.state);
-      readings.textContent = [[d.power, 1, " W"], [d.voltage, 0, " V"], [d.current, 2, " A"], [d.energy, 2, " kWh"], [d.temperature, 0, " °C"]]
-        .map(([v, digits, unit]) => { const t = iotNum(v, digits); return t === null ? null : t + unit; }).filter(Boolean).join(" · ");
+      text(readings, () => [[d.power, 1, " W"], [d.voltage, 0, " V"], [d.current, 2, " A"], [d.energy, 2, " kWh"], [d.temperature, 0, " °C"]]
+        .map(([v, digits, unit]) => { const formatted = iotNum(v, digits); return formatted === null ? null : formatted + unit; }).filter(Boolean).join(" · "));
       readings.hidden = !readings.textContent;
       // availability is only known when zigbee2mqtt's availability feature is on; "unknown" would just look broken
       const avail = d.availability === "online" || d.availability === "offline" ? d.availability : null;
-      seen.textContent = [avail, d.last_seen ? "seen " + iotAgo(d.last_seen) : null].filter(Boolean).join(" · ");
-      flags.textContent = [d.ieee, d.supported === false ? "unsupported" : d.supported ? "supported" : null,
-        d.interview_completed === false ? "interview pending" : null].filter(Boolean).join(" · ");
+      text(seen, () => [avail ? t(avail === "online" ? "tools.available" : "tools.unavailableDevice") : null, d.last_seen ? t("tools.seen", { ago: iotAgo(d.last_seen) }) : null].filter(Boolean).join(" · "));
+      text(flags, () => [d.ieee, d.supported === false ? t("tools.unsupported") : d.supported ? t("tools.supported") : null,
+        d.interview_completed === false ? t("tools.interviewPending") : null].filter(Boolean).join(" · "));
       card.classList.toggle("offline", d.availability === "offline");
       if (card.dataset.dirty !== "yes" && document.activeElement !== nick && document.activeElement !== note) {
         nick.value = d.nickname || "";
@@ -532,12 +561,11 @@
     if (d && d.iot_disclaimer) renderConsent(d.iot_disclaimer);
     const devices = d && d.enabled && Array.isArray(d.devices) ? d.devices : [];
     const on = devices.filter((x) => String(x.state).toUpperCase() === "ON").length;
-    $("iotSub").textContent = !d || !d.enabled ? "no smart-home server enabled" : d.blocked ? "off · safety statement not accepted"
-      : !d.connected ? "not connected"
-        : devices.length + (devices.length === 1 ? " device" : " devices") + (devices.length ? " · " + on + " on" : "");
+    text($("iotSub"), () => !d || !d.enabled ? t("tools.noHomeEnabled") : d.blocked ? t("tools.offNotAccepted")
+      : !d.connected ? t("tools.disconnected") : t("tools.deviceCount", { count: devices.length, on }));
     const hint = $("iotHint");
     hint.style.color = level === "err" ? "var(--err)" : level === "warn" ? "var(--warn)" : "";
-    hint.textContent = !d || !d.enabled ? detail : detail || (!devices.length ? "No devices yet — put a plug into pairing mode and press Find new devices." : "");
+    text(hint, () => !d || !d.enabled ? iotLight(d)[1] : iotLight(d)[1] || (!devices.length ? t("tools.noDevices") : ""));
     hint.hidden = !hint.textContent;
     const box = $("iotDevices"), present = new Set();
     for (const dev of devices) {
@@ -556,13 +584,13 @@
     $("iotPairBtn").hidden = iot.permit;
     $("iotPairBtn").disabled = !d || !d.enabled || !d.connected;
     $("iotPairStop").hidden = !iot.permit;
-    $("iotPairNote").textContent = iot.permit
-      ? "Pairing is open" + (left ? " — " + Math.floor(left / 60) + ":" + String(left % 60).padStart(2, "0") + " left" : "") + ". Put the new plug into pairing mode now."
-      : disc.zigbee2mqtt_online === false && d && d.connected ? "zigbee2mqtt is offline — check the launcher console."
-      : "Put a new plug into pairing mode, then press Find.";
+    text($("iotPairNote"), () => iot.permit
+      ? t("tools.pairing", { left: left ? t("tools.left", { time: Math.floor(left / 60) + ":" + String(left % 60).padStart(2, "0") }) : "" })
+      : disc.zigbee2mqtt_online === false && d && d.connected ? t("tools.zigbeeOffline") : t("tools.pairHint"));
     const events = (Array.isArray(disc.events) ? disc.events : []).slice().sort((a, b) => (b.at || 0) - (a.at || 0)).slice(0, 8);
     $("iotEvents").replaceChildren(...events.map((e, i) =>
-      el("div", { class: i === 0 ? "fresh" : "", text: [iotClock(e.at), e.type, e.device, e.status, e.description].filter(Boolean).join(" ") })));
+      el("div", { class: i === 0 ? "fresh" : "", render: () => [iotClock(e.at), e.type, e.device, e.status, e.description].filter(Boolean).join(" ") })));
+    pruneBindings();
   }
   async function iotRefresh() {
     clearTimeout(iot.timer); iot.timer = null;
@@ -570,21 +598,21 @@
     try { renderIot(await getJSON("/api/build_f/iot")); }
     catch (error) {
       $("iotDot").className = "dot err";
-      $("iotSub").textContent = "unavailable";
+      text($("iotSub"), () => t("tools.unavailable"));
       const hint = $("iotHint");
       hint.hidden = false; hint.style.color = "var(--err)";
-      hint.textContent = "Smart home status unavailable: " + (error.message || error) + " — is the brain running?";
+      text(hint, () => t("tools.homeError", { error: error.message || error }));
     }
     iot.timer = setTimeout(iotRefresh, iot.permit ? 1500 : 3000);
   }
   document.addEventListener("visibilitychange", () => { if (!document.hidden && !iot.timer) iotRefresh(); });
   $("iotPairBtn").addEventListener("click", async () => {
     $("iotPairBtn").disabled = true;
-    if (await iotPost("/api/build_f/iot/pairing", "iot-pairing", { enable: true, seconds: 254 })) toast("Pairing is open for about four minutes.");
+    if (await iotPost("/api/build_f/iot/pairing", "iot-pairing", { enable: true, seconds: 254 })) toast(t("tools.pairingOpened"));
     iotRefresh();
   });
   $("iotPairStop").addEventListener("click", async () => {
-    if (await iotPost("/api/build_f/iot/pairing", "iot-pairing", { enable: false })) toast("Pairing closed.");
+    if (await iotPost("/api/build_f/iot/pairing", "iot-pairing", { enable: false })) toast(t("tools.pairingClosed"));
     iotRefresh();
   });
   iotRefresh();
@@ -593,7 +621,7 @@
     try { apply(await getJSON("/api/build_f/tools")); }
     catch (error) {
       $("serversBox").replaceChildren(el("section", { class: "tech-card" },
-        el("div", { class: "card-hint", text: "Tool layer unavailable: " + (error.message || error) + " — is the brain running?" })));
+        el("div", { class: "card-hint", render: () => t("tools.toolsError", { error: error.message || error }) })));
     }
   }
   refresh();

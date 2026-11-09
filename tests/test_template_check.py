@@ -135,7 +135,7 @@ class TemplateLayoutTests(unittest.TestCase):
         data = json.loads(scenes)
         # deep.* blocks address her in the second person (her own output stays 我说/我心想)
         style = data["deep"]["static"]["communication_style"]
-        self.assertIn("你会中日英三种语言", style)
+        self.assertIn("你会中日英韩四种语言", style)
         self.assertNotIn("我会", style)
         self.assertTrue(data["surface"]["context"].strip())
         # every time slot offers 1-5 possibilities (the brain lives one of them per day), and the two scene

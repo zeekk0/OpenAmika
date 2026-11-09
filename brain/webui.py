@@ -1515,7 +1515,7 @@ def _local_time_str() -> str:
     return f"现在是{weekday}{period}{now.hour}点。"
 
 
-_DETECTED_LANG_NAMES = {"zh": "CHINESE", "en": "ENGLISH", "ja": "JAPANESE",
+_DETECTED_LANG_NAMES = {"zh": "CHINESE", "en": "ENGLISH", "ja": "JAPANESE", "ko": "KOREAN",
                         "mixed": "MIXED (follow the user's style)"}
 
 
@@ -1525,14 +1525,17 @@ def detect_language(text: str) -> str:
     return _DETECTED_LANG_NAMES.get(po_contract.detect_lang(text or ""), "CHINESE")
 
 
-def build_surface_messages(user_message: str, lang_text: str = None) -> dict:
+def build_surface_messages(user_message: str, lang_text: str = None, reply_lang: str = None) -> dict:
     """表层模板：和深层同一套固定上下文/时间/场景/记忆（表层预算）填充，
     {relationship_context} 用 scenes.json 的 surface.context（第二人称，R17），
     历史只喂说出口的台词，再补表层专有的 {detected_lang}。
-    lang_text：用来判断语种的干净原话（打断包装之前）；不给就用 user_message 去掉内部标记后的文本。"""
+    lang_text：用来判断语种的干净原话（打断包装之前）；不给就用 user_message 去掉内部标记后的文本。
+    reply_lang：建轮时裁定的回复语种，与深层共用；旧调用不传时按原话裁定。"""
     static_template, dynamic_template = po_contract.split_static(load_surface_template())
     clean_user = _user_for_llm(user_message)
-    lang = detect_language(lang_text if lang_text is not None else clean_user)
+    source = lang_text if lang_text is not None else clean_user
+    target = reply_lang if reply_lang is not None else po_contract.reply_lang(source, None)[0]
+    lang = _DETECTED_LANG_NAMES.get(target, detect_language(source))
     surface = _load_scenes().get("surface") or {}
     ctx = {"relationship_context": surface["context"]} if surface.get("context") else {}
     static_prefix = _fill_static_context(static_template, ctx)
@@ -3027,7 +3030,7 @@ def _prev_reply_lang(exclude_turn_id: str = None):
             lang = t.get("reply_lang")
             if lang is None and "reply_lang_reason" not in t and t.get("f_user_text"):
                 lang = po_contract.detect_lang(t["f_user_text"])
-            if lang in ("zh", "en", "ja"):
+            if lang in po_contract.LANG_NAMES_ZH:
                 return lang
     return None
 
@@ -3154,7 +3157,7 @@ def _ws_run_generation(sid: str, turn_id: str, text: str,
             return
 
         # ── 表层 ──
-        parts = build_surface_messages(text, lang_text=lang_text)
+        parts = build_surface_messages(text, lang_text=lang_text, reply_lang=reply_lang)
         parts = _with_round_context(parts, entry.get("context", ""))
         parts = _with_capabilities(parts)
         parts["conv_id"] = sid   # xAI 缓存：surface 也 pin 到同一 server 命中前缀缓存（非 xai provider 忽略）
@@ -3426,7 +3429,7 @@ def _start_inject_gen(sid: str, note: str,
     deep_model_key = deep_model_key or DEFAULT_DEEP_MODEL
     _prune_unprotected()
     # 工具层的转述轮带着对方提出请求那一轮的语种（reply_lang），其余注入轮照旧沿用上一轮。
-    if reply_lang in ("zh", "en", "ja"):
+    if reply_lang in po_contract.LANG_NAMES_ZH:
         reply_lang_reason = "tools"
     else:
         reply_lang, reply_lang_reason = _inherited_reply_lang()

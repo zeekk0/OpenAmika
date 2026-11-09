@@ -31,8 +31,11 @@ import inspect
 import json
 import re
 import sys
+import threading
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _po_support import PROMPTS, extract_webui, pending_on, prepare_prompt_namespace  # noqa: E402
@@ -353,6 +356,80 @@ class PromptAssemblyTests(unittest.TestCase):
         surface_ctx = scenes["surface"]["context"].replace(
             "{user_name}", self.ns.get("USER_NAME") or "User").replace("{city}", city).strip()
         self.assertIn(surface_ctx, parts.get("system_static", parts["system"]))
+
+    def test_korean_resolved_target_agrees_across_tiers(self):
+        for text, lang, reason in (("Please reply in Korean", "ko", "switch"),
+                                   ("…", "ko", "inherited"),
+                                   ("한국어로 이야기하자", "ko", "detected"),
+                                   ("Please continue", "en", "detected")):
+            surface = self.ns["build_surface_messages"](text, reply_lang=lang)
+            deep = self.ns["build_messages"](text, reply_lang=lang, reply_lang_reason=reason)
+            self.assertIn("对方说的语言是" + {"ko": "KOREAN", "en": "ENGLISH"}[lang], surface["system"])
+            self.assertEqual(non_empty_lines(deep["system"])[-1], pc.language_line(lang, reason))
+
+    def test_korean_previous_turn_skips_one_turn_switch(self):
+        self.ns["CONVERSATION_HISTORY"][:] = [
+            _t(1, "한국어로 이야기하자", "", protected=True, reply_lang="ko"),
+            _t(2, "영어로 말해 줘", "", protected=True, reply_lang="en", reply_lang_reason="switch")]
+        self.assertEqual(self.ns["_prev_reply_lang"](), "ko")
+        self.assertEqual(self.ns["_inherited_reply_lang"](), ("ko", "inherited"))
+
+    def test_korean_actual_generation_target_and_metadata(self):
+        ns, prompts, emitted = self.ns, [], []
+        self.state["turns"] = []
+        ns["CONVERSATION_HISTORY"][:] = []
+
+        def create(tid, user):
+            turn = _t(len(self.state["turns"]) + 1, user, "", turn_id=tid, protected=True)
+            self.state["turns"].append(turn)
+            ns["CONVERSATION_HISTORY"].append(turn)
+            return turn
+
+        def stream(parts, config):
+            prompts.append((config, parts["system"]))
+            if config == "surface":
+                return iter(["status: ok\ntone: casual_smile\nmode: say+think\nreply: 응."])
+            return iter(['[casual_smile]"여기 있어."我心想：他在和我说话。'])
+
+        noop = lambda *a, **k: None
+        socket = SimpleNamespace(emit=lambda event, data, **kw: emitted.append((event, data)),
+                                 start_background_task=lambda fn, *args: fn(*args))
+        overrides = {"socketio": socket, "AVAILABLE_MODELS": {"surface": "surface", "deep": "deep"},
+                     "DEFAULT_SURFACE_MODEL": "surface", "DEFAULT_DEEP_MODEL": "deep",
+                     "_ws_active": {}, "_ws_active_lock": threading.RLock(),
+                     "create_turn": create, "_save_history": noop, "_prune_unprotected": noop,
+                     "_pick_stream": stream, "_with_capabilities": lambda parts: parts,
+                     "update_turn_surface": noop, "update_turn_deep": noop,
+                     "f_mark_complete": noop, "_mark_activity": noop, "_tools_after_turn": noop}
+        with patch.dict(ns, overrides):
+            steps = [("Please reply in Korean", "ko", "switch"),
+                     ("Please continue", "en", "detected"),
+                     ("오늘 날씨가 따뜻해서 산책하고 싶어", "ko", "detected"),
+                     (None, "ko", "inherited"),
+                     ("Please reply in English", "en", "switch"),
+                     (None, "ko", "inherited"),
+                     ("오늘 날씨가 정말 좋다", "ko", "detected"),
+                     ("relay", "ko", "tools")]
+            for i, (text, lang, reason) in enumerate(steps):
+                prompts.clear()
+                emitted.clear()
+                if text is None:
+                    ns["_start_open_gen"]("sid", "（我想起刚才的话题）", turn_id=str(i))
+                elif text == "relay":
+                    ns["_start_inject_gen"]("sid", "助手的结果来了", turn_id=str(i), reply_lang="ko")
+                else:
+                    ns["_start_message_gen"]("sid", text, "", "surface", "deep", turn_id=str(i))
+                self.assertFalse([p for e, p in emitted if e == "error"], emitted)
+                begin = next(p for e, p in emitted if e == "begin")
+                self.assertEqual((begin["reply_lang"], begin["reply_lang_reason"]), (lang, reason))
+                self.assertEqual(prompts[-1][0], "deep")
+                self.assertEqual(non_empty_lines(prompts[-1][1])[-1], pc.language_line(lang, reason))
+                if text not in (None, "relay"):
+                    self.assertIn("对方说的语言是" + {"ko": "KOREAN", "en": "ENGLISH"}[lang], prompts[0][1])
+                    surface = next(p for e, p in emitted if e == "surface_done")
+                    self.assertEqual((surface["reply_lang"], surface["reply_lang_reason"]), (lang, reason))
+                else:
+                    self.assertEqual(len(prompts), 1)
 
     def test_surface_history_has_no_tags_or_thoughts(self):
         system = self.surface()["system"]

@@ -74,6 +74,34 @@ def test_statement_versions_agree_everywhere():
         assert VERSION in json.dumps(blocks, ensure_ascii=False), code   # each language carries its version
 
 
+def test_korean_statement_is_translation_only_and_cannot_accept():
+    doc = tools_doc(iot_enabled=True)
+    before = copy.deepcopy(doc)
+    statement = iot_disclaimer.statement()
+    korean = statement["languages"]["ko"]
+    assert korean["label"] == "한국어"
+    assert statement["source_language"] == "en"
+    assert statement["translation_only"] is True
+    assert statement["version"] == "2026-11-03"
+    text = json.dumps(korean["blocks"], ensure_ascii=False)
+    for phrase in ("비결정적", "프롬프트 인젝션", "보장하지", "전적으로", "MekaHime Inc.",
+                   "난방기", "차고 문", "의료", "물리적", "언제든지", "영어 원문", "동의하지"):
+        assert phrase in text, phrase
+    assert [b["type"] for b in korean["blocks"]] == [b["type"] for b in statement["languages"]["en"]["blocks"]]
+    assert [len(b["items"]) for b in korean["blocks"] if b["type"] == "ul"] == [len(b["items"]) for b in statement["languages"]["en"]["blocks"] if b["type"] == "ul"]
+    assert doc == before
+    assert not iot_disclaimer.accepted(doc)
+    assert iot_disclaimer.status(doc)["held"] == ["iot"]
+
+
+def test_missing_korean_statement_is_refused(tmp_path):
+    text = (ROOT / "docs/IOT_DISCLAIMER.md").read_text("utf-8")
+    partial = tmp_path / "statement.md"
+    partial.write_text(re.sub(r"<!-- iot-disclaimer:ko -->.*?<!-- /iot-disclaimer:ko -->", "", text, flags=re.S), "utf-8")
+    with pytest.raises(ValueError, match="ko"):
+        iot_disclaimer.statement(partial)
+
+
 def test_statement_has_english_japanese_and_chinese_with_the_same_shape():
     languages = iot_disclaimer.statement()["languages"]
     assert [languages[c]["label"] for c in ("en", "ja", "zh")] == ["English", "日本語", "简体中文"]
@@ -484,7 +512,7 @@ def test_gateway_acceptance_needs_the_box_and_the_current_version(gateway):
 def test_gateway_serves_the_statement_and_its_acceptance(gateway):
     shown = asyncio.run(gateway.ns["build_f_iot_disclaimer"]())
     assert shown["ok"] is True and shown["version"] == VERSION and shown["accepted"] is False
-    assert set(shown["statement"]["languages"]) == {"en", "ja", "zh"}
+    assert set(shown["statement"]["languages"]) == {"en", "ja", "zh", "ko"}
     gateway.write(tools_doc(accepted=VERSION))
     assert asyncio.run(gateway.ns["build_f_iot_disclaimer"]())["accepted"] is True
 

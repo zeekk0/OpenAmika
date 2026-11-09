@@ -1,7 +1,7 @@
 """The IoT safety statement: its version, what counts as IoT, and whether the person accepted it.
 
 Amika reaches real devices only after the person has read and accepted docs/IOT_DISCLAIMER.md (English, Japanese,
-Simplified Chinese) on the Tools page. The acceptance is kept in config/tools.json:
+Simplified Chinese, Korean) on the Tools page. The acceptance is kept in config/tools.json:
 
     "iot_disclaimer": {"version": "2026-11-03", "accepted_at": "2026-11-03T21:04:05Z"}
 
@@ -28,7 +28,7 @@ DOC_NAME = "docs/IOT_DISCLAIMER.md"
 ROOT = Path(__file__).resolve().parent.parent
 DOC_PATH = ROOT / "docs" / "IOT_DISCLAIMER.md"
 TOOLS_PATH = ROOT / "config" / "tools.json"
-LANGUAGES = ("en", "ja", "zh")
+LANGUAGES = ("en", "ja", "zh", "ko")
 REQUIRED_MESSAGE = (f"IoT stays off until you accept the IoT safety statement ({DOC_NAME}, version "
                     f"{IOT_DISCLAIMER_VERSION}). Turn IoT on from the Tools page to read it.")
 
@@ -129,7 +129,7 @@ def read_tools(path=None) -> dict:
 # ── the statement itself, for the Tools page ────────────────────────────────────────────
 
 _VERSION_MARK = re.compile(r"<!--\s*IOT_DISCLAIMER_VERSION:\s*([0-9A-Za-z.\-]+)\s*-->")
-_SECTION = re.compile(r"<!--\s*iot-disclaimer:(en|ja|zh)\s*-->(.*?)<!--\s*/iot-disclaimer:\1\s*-->", re.S)
+_SECTION = re.compile(r"<!--\s*iot-disclaimer:(en|ja|zh|ko)\s*-->(.*?)<!--\s*/iot-disclaimer:\1\s*-->", re.S)
 
 
 def _blocks(markdown: str) -> list:
@@ -162,7 +162,7 @@ def _blocks(markdown: str) -> list:
 
 def statement(path=None) -> dict:
     """docs/IOT_DISCLAIMER.md for the Tools page: {"version", "doc", "languages": {code: {"label", "blocks"}}} with
-    codes en, ja, zh. Raises ValueError when the file's version is not IOT_DISCLAIMER_VERSION or a language is
+    codes en, ja, zh, ko. Raises ValueError when the file's version is not IOT_DISCLAIMER_VERSION or a language is
     missing, and OSError when it cannot be read: the page then cannot show it, and IoT stays off."""
     text = Path(path or DOC_PATH).read_text(encoding="utf-8-sig")
     mark = _VERSION_MARK.search(text)
@@ -177,4 +177,6 @@ def statement(path=None) -> dict:
     missing = [code for code in LANGUAGES if not (languages.get(code) or {}).get("blocks")]
     if missing:
         raise ValueError(f"{DOC_NAME} has no text for: {', '.join(missing)}")
-    return {"version": IOT_DISCLAIMER_VERSION, "doc": DOC_NAME, "languages": {code: languages[code] for code in LANGUAGES}}
+    # Adding a translation does not change the accepted safety obligations or create an acceptance.
+    return {"version": IOT_DISCLAIMER_VERSION, "doc": DOC_NAME, "source_language": "en",
+            "translation_only": True, "languages": {code: languages[code] for code in LANGUAGES}}

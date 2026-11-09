@@ -214,7 +214,9 @@ TAGGED_QUOTE_RE = re.compile(
 TAGGED_BARE_RE = re.compile(_TAG_TOKEN + r"[ \t]*[:：]?[ \t]*([^\n“\"「『\[【（(][^\n]*)")
 THINK_RE = re.compile(r"我(?:心想|反思|思考)[:：]")
 SAY_RE = re.compile(r"我(?:接着)?[说說][:：]")
-LANG_TAG_RE = re.compile(r"^\s*[（(]\s*(?:中文|日本語|日语|English|英文|英语)\s*[）)]\s*")
+LANG_LABELS = ("中文", "日本語", "日语", "English", "英文", "英语",
+               "Korean", "한국어", "韩语", "韓語", "韓国語")
+LANG_TAG_RE = re.compile(r"^\s*[（(]\s*(?:" + "|".join(LANG_LABELS) + r")\s*[）)]\s*", re.I)
 MD_SPAN_RE = re.compile(r"[*＊]{1,2}([^*＊\n]{1,120})[*＊]{1,2}")
 LITERAL_NL_RE = re.compile(r"\\n")
 _SEPARATOR_RE = re.compile(r"^[\s\-—–_=~·]*$")
@@ -224,7 +226,7 @@ _PUNCT_ONLY_RE = re.compile(r"^[\s,，.。、!！?？…—\-~～:：;；]*$")
 def _md_span(m: "re.Match") -> str:
     inner = m.group(1).strip()
     han, kana, latin = lang_counts(inner)
-    if han and not latin and len(inner) <= 12:      # *笑了一下* : a narrated action
+    if han and not latin and not hangul_count(inner) and len(inner) <= 12:  # *笑了一下*: action
         return " "
     return inner                                     # *The Glass Orchard* : emphasis
 
@@ -607,8 +609,14 @@ def parse_surface(raw: str) -> dict:
 _HAN = re.compile(r"[一-鿿㐀-䶿]")
 _KANA = re.compile(r"[぀-ヿㇰ-ㇿ]")
 _LATIN = re.compile(r"[A-Za-z]")
-LANG_NAMES_ZH = {"zh": "中文", "en": "英语", "ja": "日语"}
-LANG_TO_TTS = {"zh": "Chinese", "en": "English", "ja": "Japanese"}
+_HANGUL = re.compile(r"[\u1100-\u11ff\u3130-\u318f\ua960-\ua97f\uac00-\ud7a3\ud7b0-\ud7ff]")
+LANG_NAMES_ZH = {"zh": "中文", "en": "英语", "ja": "日语", "ko": "韩语"}
+LANG_TO_TTS = {"zh": "Chinese", "en": "English", "ja": "Japanese", "ko": "Korean"}
+
+
+def hangul_count(text: str) -> int:
+    """Count Hangul syllables/jamo after NFC analysis, without changing stored text."""
+    return len(_HANGUL.findall(unicodedata.normalize("NFC", text or "")))
 
 
 def lang_counts(text: str) -> Tuple[int, int, int]:
@@ -617,8 +625,18 @@ def lang_counts(text: str) -> Tuple[int, int, int]:
 
 
 def detect_lang(text: str) -> Optional[str]:
-    """'zh' | 'en' | 'ja' | 'mixed' | None (no letters at all)."""
+    """'zh' | 'en' | 'ja' | 'ko' | 'mixed' | None (no letters at all).
+
+    Romanized Korean is ambiguous and is not automatically classified as Korean.
+    """
     han, kana, latin = lang_counts(text)
+    hangul = hangul_count(text)
+    if hangul:
+        # Keep the legacy no-Hangul heuristics intact. With Korean present,
+        # require the same 60% dominance rather than kana's legacy shortcut.
+        counts = {"zh": han, "en": latin, "ja": kana, "ko": hangul}
+        top = max(counts, key=counts.get)
+        return top if counts[top] / sum(counts.values()) >= 0.6 else "mixed"
     total = han + kana + latin
     if total == 0:
         return None
@@ -635,7 +653,7 @@ def detect_lang(text: str) -> Optional[str]:
 
 def is_kanji_only(text: str) -> bool:
     han, kana, latin = lang_counts(text)
-    return han > 0 and kana == 0 and latin == 0
+    return han > 0 and kana == 0 and latin == 0 and hangul_count(text) == 0
 
 
 _SWITCH_PATTERNS = [
@@ -645,11 +663,27 @@ _SWITCH_PATTERNS = [
 ]
 _LANG_WORD = {"japanese": "ja", "english": "en", "chinese": "zh", "mandarin": "zh", "cantonese": "zh",
               "日语": "ja", "日文": "ja", "日本語": "ja", "英语": "en", "英文": "en", "英語": "en",
-              "中文": "zh", "汉语": "zh", "国语": "zh", "普通话": "zh", "中国語": "zh"}
+              "中文": "zh", "汉语": "zh", "国语": "zh", "普通话": "zh", "中国語": "zh",
+              "korean": "ko", "韩语": "ko", "韓語": "ko", "韓国語": "ko",
+              "한국어": "ko", "영어": "en", "일본어": "ja", "중국어": "zh"}
+
+# New request forms are intentionally narrower than the legacy switch rules:
+# mentioning a Korean book or a Korean-speaking friend is not an instruction.
+_KOREAN_SWITCH_PATTERNS = (
+    re.compile(r"(?:^|[.!?]\s*)(?:(?:can|could|would) you\s+)?(?:please\s+)?(?:reply|answer|respond|speak|say|use|switch|translate)(?:\s+(?:it|this|that))?(?:\s+(?:in|into|to))?\s+(korean)\b", re.I),
+    re.compile(r"\bhow (?:do|would|can) (?:I|you|we) say\b[^.!?\n]*\bin\s+(korean)\b", re.I),
+    re.compile(r"(?:^|[。！？!?，,]\s*)(?:请|請|麻烦|麻煩)?(?:用|说|講|讲|换成?|改用|试试|教我|来点|来句|说句)\s*(韩语|韓語)"),
+    re.compile(r"(韓国語)で(?:答えて|話して|言って|お願い|返事|返答)"),
+    re.compile(r"(한국어|영어|일본어|중국어)로\s*(?:(?:짧게|간단히|간단하게)\s+)?(?:말해|답해|대답해|답변해|이야기해|번역해|인사해)\s*(?:줘|주세요|줄래|줄래요)?[.!?。？！~ ]*$"),
+)
 
 
 def explicit_switch(text: str) -> Optional[str]:
     """An explicit request to answer in a language, valid for this turn only."""
+    for pat in _KOREAN_SWITCH_PATTERNS:
+        m = pat.search(unicodedata.normalize("NFC", text or ""))
+        if m:
+            return _LANG_WORD[m.group(1).lower()]
     for pat, _ in _SWITCH_PATTERNS:
         m = pat.search(text or "")
         if m:
@@ -663,9 +697,9 @@ def reply_lang(user_text: str, prev_lang: Optional[str]) -> Tuple[Optional[str],
     if sw:
         return sw, "switch"
     d = detect_lang(user_text)
-    if d in ("zh", "en", "ja") and len((user_text or "").strip()) >= 2:
+    if d == "ko" or (d in ("zh", "en", "ja") and len((user_text or "").strip()) >= 2):
         return d, "detected"
-    if prev_lang in ("zh", "en", "ja"):
+    if prev_lang in LANG_NAMES_ZH:
         return prev_lang, "inherited"
     return None, "unknown"
 

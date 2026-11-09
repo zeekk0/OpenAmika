@@ -3,4 +3,5 @@
   "use strict";
   window.OA.nav("about");
   window.OA.footer();
+  window.OAI18n.translate();
 })();

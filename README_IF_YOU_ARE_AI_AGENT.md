@@ -57,8 +57,13 @@ ever disagree, the code wins, and you should fix this file in the same change.
   **them** as roommates (rent-free; her side of the deal is being the best company she can). The persona is written
   for a young man a little older than her (the Chinese prompts say 他). When he eats she teases him with one fixed
   English line, "You Holy Big Fat Ass", in every language: a running joke of her fans, kept on purpose.
-- **Languages**: she answers in the language the person speaks (English, Japanese or Chinese); "say it in Japanese"
+- **Languages**: her reply policy follows English, Japanese, Chinese or Korean; "say it in Japanese"
   switches for one turn. Her prompts are Chinese on purpose and her inner thoughts (`我心想：`) stay Chinese.
+  Korean voice remains experimental until actual Windows synthesis and pronunciation acceptance. Do not infer
+  Korean capability from generic `/ping` health. `scripts/setup_tts.py --verify` checks Korean separately without
+  installing anything. Windows Korean uses the wheel-backed python-mecab-ko tokenizer in both the probe
+  and synthesis, bypassing upstream eunjeon auto-install/dictionary-copy code. Existing personalized templates
+  may need a manual merge of the shipped language rules.
 - **Three tiers, three LLM roles** (plus a fourth for memory), each with its own template, hot-reloaded on save:
 
   | role | template | what it does |

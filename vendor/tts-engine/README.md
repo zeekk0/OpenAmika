@@ -304,7 +304,12 @@ inference subset and prefers packages that ship wheels, so no compiler is needed
 | (only transitive upstream) | `resampy`, `matplotlib`, `rich`, `loguru`, `einops`, `soundfile`, `huggingface_hub` | imported by the inference code; upstream gets them through the packages left out above |
 | | `python-socketio`, `aiohttp` | the server |
 
-Korean (`g2pk2`) and Cantonese (`ToJyutping`) are installed but not exercised by OpenAmika's tests.
+Korean (`g2pk2`) is listed in the dependencies, but its platform-specific Mecab package and dictionary must also
+be present. OpenAmika now tests Korean request routing and the guarded no-install capability check offline.
+`scripts/setup_tts.py --verify` reports Korean G2P readiness separately without making other-language readiness
+depend on it. Korean audio quality, names, mixed-language speech and interruption timing still require acceptance
+on the supported Windows installation with licensed assets, so Korean voice remains experimental.
+Cantonese (`ToJyutping`) remains outside this Korean milestone. See [Korean voice status](../../docs/TTS.md#korean-voice-status).
 
 ## Performance
 

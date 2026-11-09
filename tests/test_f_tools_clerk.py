@@ -102,6 +102,50 @@ def test_quote_ok_is_punctuation_and_space_insensitive():
     assert not f_tools.quote_ok("帮我关灯", "你能帮我开灯吗？")
 
 
+def test_korean_job_language_and_fallback_label(wired):
+    assert f_tools._lang_label(None, "근처 식당을 찾아 줘") == "韩文（ko）"
+    f_tools._register_job("hermes", "식당 찾기", "t-ko", {"job": "j-ko", "state": "running"}, "ko")
+    assert f_tools._JOBS["hermes:j-ko"]["reply_lang"] == "ko"
+
+
+@pytest.mark.parametrize("text,label", [
+    ("あ hello this is mostly English", "日文（ja）"),
+    ("漢 hello this is mostly English", "中文（zh）"),
+    ("漢字が hello this is mostly English", "日文（ja）"),
+    ("hello world", "英文（en）"),
+])
+def test_language_label_preserves_legacy_no_hangul_precedence(text, label):
+    assert f_tools._lang_label(None, text) == label
+
+
+@pytest.mark.parametrize("user,quote,approved,allowed", [
+    ("네, 결제를 승인해요.", "결제를 승인해요", True, True),
+    ("아니요, 결제하지 마세요.", "결제하지 마세요", False, True),
+    ("좀 생각해 볼게요.", "결제를 승인해요", True, False),
+    ("알겠어요.", "알겠어요", None, False),
+])
+def test_korean_quote_verified_approval_and_denial(wired, user, quote, approved, allowed):
+    _job(state="waiting_approval", reply_lang="en",
+         pending={"kind": "approval", "id": "p-ko", "text": "결제할까요?"})
+    wired["state"]["reply"] = json.dumps({"calls": [], "answers": [
+        {"job": "j1", "approved": approved, "quote": quote}]}, ensure_ascii=False)
+    outcome = f_tools.run_clerk("t-ko", user, "결제를 승인해요.", reply_lang="ko")
+    assert outcome["answers"] == int(allowed)
+    if allowed:
+        assert wired["hub"].calls[-1][2]["approved"] is approved
+        assert f_tools._JOBS["hermes:j1"]["reply_lang"] == "ko"
+    else:
+        assert wired["hub"].calls == []
+
+
+def test_korean_helper_relay_preserves_language(wired):
+    captured = []
+    wired["g"]["_start_inject_gen"] = lambda sid, note, **kw: captured.append(kw) or "ko-relay"
+    f_tools._relay("한국어 결과", reply_lang="ko")
+    f_tools._drain_relays()
+    assert captured[0]["reply_lang"] == "ko"
+
+
 def test_parse_llm_json_is_tolerant():
     assert f_tools._parse_llm_json('```json\n{"calls":[],"note":"x"}\n```') == {"calls": [], "note": "x"}
     assert f_tools._parse_llm_json('Sure: {"calls":[{"tool":"a"},],"note":"x",}') == {"calls": [{"tool": "a"}], "note": "x"}
