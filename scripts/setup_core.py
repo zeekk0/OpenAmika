@@ -807,7 +807,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                 row("!! ", "Python", str(e) if args.python else PYTHON_NEEDED)
                 steps.failed.append("Python")
         gpu = None if args.cpu else gpu_info()
-        device = "mac" if IS_MAC and not args.cpu else ("cuda" if gpu else "cpu")
+        device = "cuda" if gpu else ("mac" if IS_MAC and not args.cpu else "cpu")   # an NVIDIA card wins on any OS
         if gpu:
             row("OK ", "GPU", f"{gpu[0]}, {gpu[1] / 1024:.0f} GB: CUDA 12.8 builds")
         elif not IS_MAC:

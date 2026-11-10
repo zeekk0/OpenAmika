@@ -70,6 +70,7 @@ import asyncio
 import contextlib
 import json
 import urllib.request
+import ntpath
 import os
 import re
 import shlex
@@ -587,11 +588,17 @@ def autostart_config(scfg: dict):
 _OPENAMIKA = Path(__file__).resolve().parent.parent
 
 
+def expand_vars(text):
+    """%VARIABLES% and $VARIABLES expanded on every platform (ntpath knows both forms; posixpath only $VAR), so a
+    config/tools.json written on Windows reads the same way on Linux or macOS."""
+    return ntpath.expandvars(str(text))
+
+
 def launch_path(value: str, command: bool = False) -> str:
     """An autostart path as it is run, by the same rule as launch.py's launch_path (the launcher starts the agents
     first, the brain restarts them): %VARIABLES% expanded (%LOCALAPPDATA%\\hermes\\bin\\hermes.exe), a relative path
     taken from the OpenAmika folder. A bare command name (`hermes`) is left to the PATH."""
-    text = os.path.expandvars(str(value).strip())
+    text = expand_vars(str(value).strip())
     if command and not ("/" in text or "\\" in text):
         return text
     if Path(text).is_absolute() or re.match(r"^[A-Za-z]:[\\/]", text) or text.startswith(("\\\\", "//")):
@@ -636,7 +643,7 @@ def start_agent(name: str, scfg: dict, *, force: bool = False):
             return rec                                  # still coming up
         if rec["attempts"] >= _AUTOSTART_MAX_ATTEMPTS or now - float(rec.get("last") or 0) < _AUTOSTART_MIN_GAP:
             return None
-    cmd = [launch_path(cfg["command"], command=True), *(os.path.expandvars(a) for a in cfg["args"])]
+    cmd = [launch_path(cfg["command"], command=True), *(expand_vars(a) for a in cfg["args"])]
     rec.update({"attempts": rec["attempts"] + 1, "last": now, "started_at": now, "cmd": " ".join(cmd), "error": None})
     try:
         log = open(_agent_log_path(name), "ab")
