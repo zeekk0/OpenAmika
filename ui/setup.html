@@ -36,7 +36,7 @@
     <div class="prov-switch" id="provSwitch" style="margin:12px 0;">
       <button type="button" class="prov" id="provOpenrouter" data-prov="openrouter"><b>OpenRouter</b><span>recommended · her tested models · a few dollars a month</span></button>
       <button type="button" class="prov" id="provOllama" data-prov="ollama"><b>Ollama</b><span>fully local · a 27B+ model · a 32 GB GPU or a second PC</span></button>
-      <button type="button" class="prov" id="provCompat" data-prov="compat"><b>OpenAI-compatible</b><span>fully local · vLLM, llama.cpp or LM Studio · no key</span></button>
+      <button type="button" class="prov" id="provCompat" data-prov="compat"><b>OpenAI-compatible</b><span>vLLM, llama.cpp, LM Studio or a hosted API</span></button>
     </div>
     <p class="card-hint" id="modelBusyNote" hidden style="margin:0 0 12px;"></p>
     <div id="orPanel">
@@ -86,6 +86,8 @@
       <div class="form-row" style="margin-bottom:8px;">
         <div class="field" style="flex:2"><label>Server address</label>
           <input type="text" id="compatUrl" placeholder="http://127.0.0.1:1234/v1" autocomplete="off"></div>
+        <div class="field" style="flex:2"><label>API key (only if the server asks for one)</label>
+          <input type="password" id="compatKey" placeholder="leave empty to keep the saved key" autocomplete="off"></div>
         <button class="btn small" id="compatDetect">Detect models</button>
         <span class="card-hint" id="compatStatus">checking…</span>
       </div>
@@ -95,17 +97,19 @@
         <span class="card-hint" id="compatNote"></span>
       </div>
       <p class="card-hint">
-        A model server of your own with OpenAI's <code>/v1/chat/completions</code> and <code>/v1/models</code>: vLLM
+        Any server with OpenAI's <code>/v1/chat/completions</code> and <code>/v1/models</code>: vLLM
         (<code>http://127.0.0.1:8000/v1</code>), llama.cpp's server (<code>http://127.0.0.1:8080/v1</code>), LM Studio
-        (<code>http://127.0.0.1:1234/v1</code>). <b>Local only:</b> the address must be plain <code>http</code> on this
-        PC or your own network, and no API key is sent. A public address is refused.
+        (<code>http://127.0.0.1:1234/v1</code>), or a hosted API. Plain <code>http</code> is for a server on this PC or
+        your own network; anything else must be <code>https</code>. A key is saved in <code>brain/.env</code> and sent
+        only to the address you entered it for.
       </p>
       <p class="card-hint">
         <b>The model's size matters as much as on Ollama:</b> below 27B parameters she loses her character and breaks her
         reply format. Load it with a context of at least 16k tokens: her prompts are about 8k, and many servers default
         to less and cut them silently. A model that thinks at length can use up its whole answer and say nothing, so
-        prefer one with thinking turned off for her surface and deep roles. Nothing is charged for these models, and
-        her cost tile shows them at zero.
+        prefer one with thinking turned off for her surface and deep roles. <b>Her cost tile shows a server of your own at
+        zero</b>. A hosted API is counted only when it reports its charge with each answer (xAI does); otherwise it shows
+        zero too, and bills you on its own account.
       </p>
     </div>
     <div data-pro>

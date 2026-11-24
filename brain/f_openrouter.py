@@ -463,7 +463,8 @@ class OpenRouterClient:
         receipt["usage_complete"] = receipt["usage"]["complete"]
         receipt["warnings"] = receipt["usage"].get("warnings", [])
         receipt["issues"].extend(receipt["usage"]["issues"])
-        if receipt["cost_usd"] is not None and receipt["cost_usd"] > receipt["estimated_max_usd"] + 1e-9:
+        if (receipt["cost_usd"] is not None and not receipt.get("reservation_is_placeholder")
+                and receipt["cost_usd"] > receipt["estimated_max_usd"] + 1e-9):
             receipt["issues"].append("reported_charge_exceeds_reservation")
         receipt["status"] = "cancelled" if cancelled else "complete" if done and not error and not receipt["issues"] else "unknown"
         if drained and receipt["status"] == "complete":

@@ -7,10 +7,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
 class LlmStub:
-    def __init__(self, models=(), reply="ok", refuse=0):
-        """refuse: an HTTP status to answer every request with (401 for a server that wants a key)."""
+    def __init__(self, models=(), reply="ok", refuse=0, usage=None):
+        """refuse: an HTTP status to answer every request with (401 for a server that wants a key). usage: the usage
+        object of every answer (default: 5 prompt tokens and 1 completion token, no charge)."""
         self.requests = []
         stub, stub_models, stub_reply = self, list(models), reply
+        stub_usage = usage or {"prompt_tokens": 5, "completion_tokens": 1}
 
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, *args):
@@ -38,14 +40,14 @@ class LlmStub:
                 self._record(body)
                 if refuse or not body.get("stream"):
                     self._json({"model": body["model"], "choices": [{"message": {"content": stub_reply}, "finish_reason": "stop"}],
-                                "usage": {"prompt_tokens": 5, "completion_tokens": 1}})
+                                "usage": stub_usage})
                     return
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
                 self.end_headers()
                 rows = [{"model": body["model"], "choices": [{"delta": {"content": stub_reply}, "finish_reason": None}]},
                         {"model": body["model"], "choices": [{"delta": {}, "finish_reason": "stop"}]},
-                        {"choices": [], "usage": {"prompt_tokens": 5, "completion_tokens": 1}}]
+                        {"choices": [], "usage": stub_usage}]
                 for row in rows:
                     self.wfile.write(("data: " + json.dumps(row) + "\n\n").encode("utf-8"))
                 self.wfile.write(b"data: [DONE]\n\n")

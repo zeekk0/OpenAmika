@@ -63,6 +63,9 @@ STATUS_VALUES = {"complete", "drained", "cancelled", "failed", "unknown"}
 FINAL_STATUSES = ("complete", "drained")
 # Providers that report tokens but no cost; their transport supplies the price-table amount.
 PRICE_TABLE_PROVIDERS = {"alibaba"}
+# An OpenAI-compatible server may put its charge in the usage object (xAI does). Its transport passes that charge as
+# reported_cost_usd only when the server reported one; otherwise the row is priced at its (zero) snapshot rates.
+SERVER_REPORTED_PROVIDERS = {"openai_compat"}
 # Prompt cache. Embeddings are never served from a prompt cache; rows written before the
 # per-row ``cache_reported`` flag existed are judged by what their provider normally reports.
 EMBEDDING_PHASES = ("query_embedding", "memory_embedding")
@@ -496,6 +499,10 @@ class UsageMeter:
                 pricing_status = "priced" if complete else "partial"
             estimated_cost = cost if is_router else None
             cost_source = "snapshot_rates" if cost is not None else "unavailable"
+            if (row["provider"] in SERVER_REPORTED_PROVIDERS and reported_cost_usd is not None and reported_valid
+                    and normalized["has_usage"]):
+                cost, cost_source = float(reported), "provider_reported"
+                pricing_status = "priced" if complete else "partial"
             if row["provider"] in PRICE_TABLE_PROVIDERS and reported_valid and normalized["has_usage"]:
                 # Model Studio returns no charge: the transport priced these exact counts
                 # from the reviewed list prices (tier, peak hours, cached input).

@@ -194,9 +194,9 @@
     $("provCompat").classList.toggle("active", onCompat);
     $("provOpenrouter").querySelector("span").textContent = onCloud && !onOllama && !onCompat ? "in use · recommended · her tested models" : "recommended · her tested models · a few dollars a month";
     $("provOllama").querySelector("span").textContent = onOllama && !onCloud && !onCompat ? "in use · fully local · a 27B+ model" : "fully local · a 27B+ model · a 32 GB GPU or a second PC";
-    $("provCompat").querySelector("span").textContent = onCompat && !onCloud && !onOllama ? "in use · fully local · your own server" : "fully local · vLLM, llama.cpp or LM Studio · no key";
+    $("provCompat").querySelector("span").textContent = onCompat && !onCloud && !onOllama ? "in use · the server set below" : "vLLM, llama.cpp, LM Studio or a hosted API";
     $("orBackNote").hidden = !onOllama && !onCompat;
-    $("orBackNote").firstChild.textContent = onCompat && !onOllama ? "She is on your own model server right now. " : onCompat ? "She is on local models right now. " : "She is on Ollama right now. ";
+    $("orBackNote").firstChild.textContent = onCompat && !onOllama ? "She is on an OpenAI-compatible server right now. " : onCompat ? "She is not on OpenRouter right now. " : "She is on Ollama right now. ";
     if (!provChosen) showProvider(onCompat && !onCloud ? "compat" : onOllama && !onCloud ? "ollama" : "openrouter");
     if (kinds.has("openrouter")) loadCatalog(); else $("orGoneNote").hidden = true;
 
@@ -357,7 +357,7 @@
     });
   });
 
-  // ── a local OpenAI-compatible server (no key; the brain refuses an address that is not local) ──
+  // ── an OpenAI-compatible server (plain http only when local; a key goes only to the address it was entered for) ──
   async function loadCompat() {
     let info;
     try {
@@ -368,10 +368,11 @@
     }
     if (!$("compatUrl").value.trim()) $("compatUrl").value = info.base_url || "";
     const models = info.models || [];
-    $("compatStatus").textContent = info.reachable
+    $("compatStatus").textContent = (info.reachable
       ? "Answering · " + (models.length ? models.length + " model(s) detected" : "no models detected yet — press Detect")
       : (info.error ? info.base_url + " cannot be used: " + info.error : "not answering at " + info.base_url)
-        + (models.length ? " (" + models.length + " model(s) remembered)" : "");
+        + (models.length ? " (" + models.length + " model(s) remembered)" : ""))
+      + (info.key_saved ? " · key saved" : "");
     const inUse = info.in_use || {};
     const current = inUse.deep || inUse.surface || "";
     const select = $("compatModel");
@@ -388,7 +389,8 @@
     $("compatDetect").disabled = true;
     $("compatStatus").textContent = "asking the server…";
     try {
-      const r = await postAction("/api/build_f/compat/detect", "compat-detect", { base_url: $("compatUrl").value.trim() });
+      const r = await postAction("/api/build_f/compat/detect", "compat-detect", { base_url: $("compatUrl").value.trim(), api_key: $("compatKey").value.trim() });
+      $("compatKey").value = "";
       const n = (r.models || []).length;
       toast(n ? n + " model(s) detected — pick one and press Use this model." : "The server answered, but lists no chat models: load one first.", !n);
       await loadCompat();
@@ -400,7 +402,7 @@
     const model = $("compatModel").value;
     if (!model) { toast("Detect models first.", true); return; }
     switchModels("/api/build_f/compat/use", "compat-use", { model }, () => {
-      toast("She now thinks locally on " + model + ", on your own server.");
+      toast("She now thinks on " + model + ".");
       loadModels(); loadCompat();
     });
   });

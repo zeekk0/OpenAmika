@@ -783,8 +783,8 @@ async def build_f_ollama_use(request: Request):
     return await _build_f_control(request, "/api/build_f/ollama/use", "ollama-use", ("ok", "selections", "transport", "in_use"))
 
 
-# ── a local OpenAI-compatible server, detected on the brain (config/openai_compat.json) ──
-_COMPAT_FIELDS = ("ok", "base_url", "models", "detected_at", "reachable", "error", "in_use", "servers")
+# ── an OpenAI-compatible server, detected on the brain (config/openai_compat.json); its key is never in a reply ──
+_COMPAT_FIELDS = ("ok", "base_url", "models", "detected_at", "key_saved", "reachable", "error", "in_use", "servers")
 
 
 @app.get("/api/build_f/compat")

@@ -169,7 +169,7 @@ and the interactive map at `/flow`. Socket protocol: [brain/PROTOCOL.md](brain/P
 | `brain/f_memory.py`, `f_method.py`, `f_extract.py`, `methods.py` | evidence memory: quoted facts and original speech (no summaries), hybrid BM25 + embedding recall, extraction schema |
 | `brain/f_roles.py`, `config/llm_roles.json` | the four LLM roles, presets, validated selections |
 | `brain/f_openrouter.py`, `brain/f_ollama.py` | metered OpenRouter / Alibaba transports; the Ollama transport (`config/ollama.json`) |
-| `brain/f_compat.py` | a local OpenAI-compatible server (vLLM, llama.cpp, LM Studio) as a role transport (`config/openai_compat.json`, §5.4): detection, the local-only rule, removal of inline thinking; no API key |
+| `brain/f_compat.py` | an OpenAI-compatible server (vLLM, llama.cpp, LM Studio, a hosted API) as a role transport (`config/openai_compat.json`, §5.4): detection, plain http only for local addresses, removal of inline thinking, the optional key's binding to its address |
 | `brain/f_usage.py`, `f_settle.py`, `f_controls.py`, `config/pricing.json` | per-call usage ledger (`retire_dead`: requests no running work will finish), cost settlement, model and meter controls, Unlock, the silence-remarks setting |
 | `brain/f_persona.py` | Setup page persona editing and the OpenRouter key endpoint (writes `brain/.env`) |
 | `brain/f_reset.py` | wipe her memory / reset everything (with backups): one short wait (`wait_s`), `force`, the busy reasons in words; `wipe_offline` for `launch.py --wipe-memory` while she is not running |
@@ -580,27 +580,42 @@ to her again` (hints for 401, 402, 403, 404 "no endpoints", 429). The transport 
 `provider_detail` (`f_openrouter.describe_error`); the exception's type and message are unchanged, because memory jobs
 classify failures by them (`f_memory.TRANSIENT_ERROR`, `REJECTED_REQUEST`).
 
-**Another local server (OpenAI-compatible).** A model server of the person's own with `GET {base}/models` and
-`POST {base}/chat/completions`: vLLM, llama.cpp's server, LM Studio. It is the route for models Ollama does not load
-(NVIDIA's NVFP4 checkpoints on vLLM, for one). Setup → Brain → OpenAI-compatible → address → Detect models → Use this
-model. Headless: the two calls above with `compat/detect` (`X-Build-F-Action: compat-detect`,
-`{"base_url": "http://127.0.0.1:8000/v1"}`) and `compat/use` (`compat-use`, the same `model` / `roles` / `force` body).
+**Another server (OpenAI-compatible).** Any server with `GET {base}/models` and `POST {base}/chat/completions`:
+vLLM, llama.cpp's server, LM Studio, or a hosted API. It is the route for models Ollama does not load (NVIDIA's NVFP4
+checkpoints on vLLM, for one). Setup → Brain → OpenAI-compatible → address (and key, if the server asks for one) →
+Detect models → Use this model. Headless: the two calls above with `compat/detect` (`X-Build-F-Action: compat-detect`,
+`{"base_url": "http://127.0.0.1:8000/v1", "api_key": "…"}`, the key optional) and `compat/use` (`compat-use`, the
+same `model` / `roles` / `force` body).
 Selections read `<role>:compat:<model>`. The model-size rule above applies here too, and so does her ~8k-token
 prompt: unlike Ollama, this transport cannot set the context window, so the server must be started with at least 16k
 (vLLM: `--max-model-len 16384` or more).
 
-- **Local only, and no key.** The address must be plain `http` and must not be a public one: this PC, or a private
+- **Plain `http` is for local servers only.** Such an address must not be a public one: this PC, or a private
   network. `brain/f_compat.py` checks that when the address is saved and again before every call (`local_address`: a
-  name is looked up each time), and refuses otherwise with `… is a public address; this transport only talks to local
-  servers`. No API key is read, stored or sent, and there is no field or setting for one; a server that answers 401
-  is reported as `the server asks for an API key, and this transport sends none`. Do not add a key or a public
-  address here: hosted providers are the reviewed ones (§5.4 above).
+  name is looked up each time), and refuses otherwise with `… is a public address; plain http is for local servers
+  only: use https for a server outside your own network`. An `https` address may be anywhere. Redirects are never
+  followed.
+- **The key is optional and bound to its address.** A key typed with the address is tried first and saved only if
+  the server accepts it: in `brain/.env` as `OPENAI_COMPAT_API_KEY`, with the address it was entered for in
+  `key_base_url` (`config/openai_compat.json`). A key with a space or one of `$ # " ' \` or a backtick is refused
+  before it is sent or saved: the reader of `brain/.env` would not give it back as written at her next start
+  (`${NAME}` would become that variable's value). A new key replaces the saved one: the old key's address is unbound
+  before the key changes and the new address is bound after, so the new key never goes to the old address, and a
+  write that fails in between leaves it bound to none. It is sent only to that exact address: re-pointing the page,
+  or an entry with its own `base_url`, does not carry it elsewhere, and a key in the environment that is bound to
+  no address goes nowhere. No reply or log holds it (`key_saved` is a yes or no; a server that echoes the key has
+  it cut from the error). `launch.py --check` asks without the key. Put it in on the Setup page, not in the file by
+  hand.
 - Thinking in a separate field is ignored. Inline thinking (`<think>…</think>`, or only `</think>` when the opening
   tag is in the prompt) is removed before she can speak it (`ThinkFilter`). Where a server honours it,
   `chat_template_kwargs` (below) turns thinking on or off per model. One that thinks past its answer budget logs
   `[compat] … used its whole answer budget thinking` and she says nothing, so prefer a model with thinking off for
   `surface` and `deep`.
-- These calls are booked at zero cost and with no cache share, as Ollama's are. Tokens are zero when the server
+- These calls are booked at zero cost and with no cache share, as Ollama's are (cost source `local`). A hosted
+  API that puts its charge in the usage object is booked at that charge (cost source `provider`): xAI's
+  `cost_in_usd_ticks` (10¹⁰ ticks to the dollar), or a `cost` in dollars as OpenRouter gives it. Any other `https`
+  server's calls are booked at zero, marked `unreported`, and its bill is on its own account. Either way the budget
+  cannot stop a call to it beforehand: no price is known here before the call. Tokens are zero when the server
   reports no usage. Receipts go to `memory_f/compat_receipts/`.
 - The first-run wizard on the Use page offers OpenRouter and Ollama only; this one is set on the Setup page (the
   wizard's brain step can be skipped).
@@ -612,7 +627,7 @@ different servers or settings. An entry with only `name` runs on the file's top-
 | Field | Meaning |
 | --- | --- |
 | `served_name` | the name the server knows the model by, when `name` is your own label. List one served model twice with different options by giving the two entries different `name`s and the same `served_name`. |
-| `base_url` | this entry's server, under the same local-only rule; without it, the file's top-level `base_url`. No path means `/v1`. |
+| `base_url` | this entry's server, under the same address rule; without it, the file's top-level `base_url`. No path means `/v1`. The saved key goes to it only if it is the address the key was entered for. |
 | `chat_template_kwargs` | sent as-is in each request for this entry only, for example `{"enable_thinking": false}`. Which keys a server honours is up to it. |
 | `thinking_tokens` | added to the role's answer budget for this entry; 0 means none. |
 
@@ -628,7 +643,7 @@ different servers or settings. An entry with only `name` runs on the file's top-
 That is the usual way to let only the reflection think on one served model: `surface`, `deep` and `memory_write`
 select `big`, `reflection` selects `big-think`.
 
-An entry with a malformed field, or an address that is not local, is not offered and the brain logs why. Detect models
+An entry with a malformed field, or a public address over plain `http`, is not offered and the brain logs why. Detect models
 refreshes the plain entries from the server and keeps every entry that has more than a `name`; re-point the page at
 another server and the entries without their own `base_url` follow it. If a server is down, only the roles selecting
 its entries fail: pre-flight and the Use page check each server the roles use.
@@ -774,7 +789,8 @@ adds), the file is left with conflict markers and is not JSON any more.
 
 **`brain/.env`** (from `.env.example`; secrets only): `OPENROUTER_API_KEY` (the default provider of all four roles;
 not needed when every role is on Ollama); optional `DASHSCOPE_API_KEY` / `DASHSCOPE_BASE_URL` (Alibaba Model Studio,
-workspace in `config/alibaba_models.json`), `GEMINI_API_KEY` (legacy embedder), `GROQ_API_KEY`, `CEREBRAS_API_KEY`,
+workspace in `config/alibaba_models.json`), `OPENAI_COMPAT_API_KEY` (§5.4; set from the Setup page),
+`GEMINI_API_KEY` (legacy embedder), `GROQ_API_KEY`, `CEREBRAS_API_KEY`,
 `XAI_API_KEY`, `ANTHROPIC_API_KEY` (legacy direct providers, off by default).
 
 **`config/`**: `build_f.json` (identity and clock — §1; `memory_budget_chars`, `recent_turns`, `idle_reflection`,
@@ -1218,9 +1234,10 @@ each entry below was checked against the code):
   takes her off it. While she runs, each turn then ends with `Your model server: nothing answers at … — is it
   running?` in her chat, the header light shows `LLM server  not answering at …`, and memory work waits and is tried
   again. `!! LLM model X  not listed by the server` → load that model on the server. `!! LLM server  …
-  asks for an API key (HTTP 401), and none is ever sent` → start the server without a key. `!! LLM server  … is a
-  public address` / `is not a plain http address` → this transport is for a server on this PC or the person's own
-  network (§5.4).
+  asks for an API key (HTTP 401) and none is saved for it` → enter the key with that address on Setup → Brain. `OK
+  LLM server  answers at … (it asks for its key, which this check does not send)` is normal for a server whose key
+  is saved. `!! LLM server  … is a public address … plain http is for a server on this PC or your own network` →
+  use its `https` address (§5.4).
 - On an OpenAI-compatible server her replies are cut off or she forgets the start of her instructions → the server's
   context is under 16k tokens (§5.4). She says nothing and `logs/brain.log` has `[compat] … used its whole answer
   budget thinking` → the model thinks too long for that role: turn its thinking off on the server or pick another.

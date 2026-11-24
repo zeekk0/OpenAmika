@@ -77,16 +77,31 @@ class LocalRolesTests(unittest.TestCase):
     def test_compat_checks_say_why_a_server_will_not_do(self):
         keyed = LlmStub(["only"], refuse=401)
         self.addCleanup(keyed.close)
+        tls = unused_url().replace("http://", "https://")
         self._with_roles({"deep": "deep:compat:keyed", "surface": "surface:compat:far", "reflection": "reflection:compat:tls"})
         (launch.ROOT / "config" / "openai_compat.json").write_text(json.dumps({"base_url": keyed.url, "models": [
-            {"name": "keyed"}, {"name": "far", "base_url": "http://8.8.8.8:8000/v1"},
-            {"name": "tls", "base_url": "https://127.0.0.1:8000/v1"}]}), "utf-8")
+            {"name": "keyed"}, {"name": "far", "base_url": "http://8.8.8.8:8000/v1"}, {"name": "tls", "base_url": tls}]}), "utf-8")
         got = {detail for level, name, detail in launch.compat_checks() if (level, name) == ("err", "LLM server")}
         self.assertEqual(len(got), 3, got)
-        self.assertTrue(any("asks for an API key (HTTP 401), and none is ever sent" in d for d in got))
-        self.assertTrue(any("http://8.8.8.8:8000/v1 is a public address (8.8.8.8)" in d for d in got))
-        self.assertTrue(any("https://127.0.0.1:8000/v1 is not a plain http address" in d for d in got))
+        self.assertTrue(any("asks for an API key (HTTP 401) and none is saved for it: enter it on Setup" in d for d in got))
+        self.assertTrue(any("http://8.8.8.8:8000/v1 is a public address (8.8.8.8): plain http is for" in d for d in got))
+        self.assertIn(f"not answering at {tls} — start it (or fix its address on Setup → Brain)", got)   # https is tried
         self.assertEqual(keyed.requests[0]["auth"], None)
+
+    def test_a_server_whose_key_is_saved_is_not_sent_it_by_the_pre_flight(self):
+        keyed = LlmStub(["only"], refuse=401)
+        self.addCleanup(keyed.close)
+        self._with_roles({"deep": "deep:compat:keyed"})
+        (launch.ROOT / "brain").mkdir()
+        (launch.ROOT / "brain" / ".env").write_text("OPENAI_COMPAT_API_KEY=sk-secret\n", "utf-8")
+        doc = {"base_url": keyed.url, "key_base_url": keyed.url, "models": [{"name": "keyed"}]}
+        (launch.ROOT / "config" / "openai_compat.json").write_text(json.dumps(doc), "utf-8")
+        self.assertEqual(launch.compat_checks(), [("ok", "LLM server", f"answers at {keyed.url} (it asks for its key, which "
+                                                   "this check does not send); its models cannot be listed from here")])
+        self.assertEqual([r["auth"] for r in keyed.requests], [None])
+        doc["key_base_url"] = "http://127.0.0.1:1/v1"                 # the key belongs to another address
+        (launch.ROOT / "config" / "openai_compat.json").write_text(json.dumps(doc), "utf-8")
+        self.assertEqual([c[0] for c in launch.compat_checks()], ["err"])
 
     def test_a_role_on_a_local_server_needs_no_openrouter_key(self):
         self._with_roles({r: f"{r}:compat:m" for r in ("deep", "surface", "reflection", "memory_write")})

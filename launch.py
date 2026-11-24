@@ -485,19 +485,21 @@ def roles_all_local():
 def compat_entry_base(url):
     """config/openai_compat.json's per-entry address as the brain's loader reads it (no path means /v1)."""
     url = re.sub(r'/(?:chat/completions|models)$', '', str(url or '').strip().rstrip('/'))
-    return url + '/v1' if url and re.fullmatch(r'http://[^/]+', url) else url
+    return url + '/v1' if url and re.fullmatch(r'https?://[^/]+', url) else url
 
 
 def compat_not_local(base):
-    """Why the brain will not use this address, or '': it only talks plain http to this PC or a private network
-    (brain/f_compat.py: compat_base_url, local_address)."""
+    """Why the brain will not use this address, or '': plain http is only for this PC or a private network, and
+    anything else needs https (brain/f_compat.py: compat_base_url, local_address)."""
     try:
         parts = urlsplit(base)
         host, port = parts.hostname, parts.port or 80
     except ValueError:
         return 'is not an address'
-    if parts.scheme != 'http' or not host:
-        return 'is not a plain http address'
+    if parts.scheme not in ('http', 'https') or not host:
+        return 'is not an http or https address'
+    if parts.scheme == 'https':
+        return ''
     try:
         found = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
     except OSError:
@@ -508,9 +510,16 @@ def compat_not_local(base):
     return ''
 
 
+def compat_key_saved(doc, base):
+    """True when a key is saved for this very address (config/openai_compat.json key_base_url, brain/.env). The
+    pre-flight never reads the key's value into a request: it only needs to know whether a 401 is expected."""
+    return bool(doc.get('key_base_url') == base and read_env(ROOT / 'brain' / '.env').get('OPENAI_COMPAT_API_KEY'))
+
+
 def compat_checks():
-    """[(level, name, detail)] when a role runs on a local OpenAI-compatible server: is its address one the brain
-    will use, does it answer, does it list the models the roles need. Nothing when no role uses one."""
+    """[(level, name, detail)] when a role runs on an OpenAI-compatible server: is its address one the brain will
+    use, does it answer, does it list the models the roles need. Asks without the key, so no secret travels in the
+    pre-flight: a 401 from a server whose key is saved still proves it answers. Nothing when no role uses one."""
     try:
         picks = json.loads((ROOT / 'config' / 'llm_roles.json').read_text('utf-8-sig')).get('selections') or {}
     except Exception:
@@ -536,16 +545,21 @@ def compat_checks():
     for base, wanted in servers.items():
         why = compat_not_local(base)
         if why:
-            out.append(('err', 'LLM server', f'{base} {why}: she only uses a server on this PC or your own network '
-                                             '(Setup → Brain)'))
+            out.append(('err', 'LLM server', f'{base} {why}: plain http is for a server on this PC or your own '
+                                             'network, anything else needs https (Setup → Brain)'))
             continue
         try:
             with urlopen(base + '/models', timeout=5) as response:
                 listed = {str(m.get('id')) for m in json.loads(response.read()).get('data') or [] if isinstance(m, dict)}
         except HTTPError as error:
-            out.append(('err', 'LLM server', f'{base} asks for an API key (HTTP {error.code}), and none is ever sent: '
-                                             'start the server without one') if error.code in (401, 403) else
-                       ('warn', 'LLM server', f'answers at {base} (HTTP {error.code}); its models cannot be listed from here'))
+            if error.code in (401, 403) and compat_key_saved(doc, base):
+                out.append(('ok', 'LLM server', f'answers at {base} (it asks for its key, which this check does not '
+                                                'send); its models cannot be listed from here'))
+            elif error.code in (401, 403):
+                out.append(('err', 'LLM server', f'{base} asks for an API key (HTTP {error.code}) and none is saved '
+                                                 'for it: enter it on Setup → Brain'))
+            else:
+                out.append(('warn', 'LLM server', f'answers at {base} (HTTP {error.code}); its models cannot be listed from here'))
             continue
         except Exception:
             out.append(('err', 'LLM server', f'not answering at {base} — start it (or fix its address on Setup → Brain)'))
@@ -1451,7 +1465,7 @@ def preflight(cfg, emb, vis, tools, tools_error, services, agents, procs, deep=F
         report.add('ok', 'API keys', f'OpenRouter key set (…{key[-4:]})' + (f'; also {", ".join(others)}' if others else ''))
     elif local_only:
         report.add('ok', 'API keys', 'no OpenRouter key, none needed: every role runs on '
-                                     + ('your own server' if compat_rows else 'Ollama') + ' (Setup → Brain)')
+                                     + ('the server you set' if compat_rows else 'Ollama') + ' (Setup → Brain)')
     else:
         report.add('warn', 'API keys', 'no OpenRouter key yet — paste it in the first-run wizard on the Use page (or put '
                                        'it after OPENROUTER_API_KEY= in brain/.env); until then she cannot answer. '
