@@ -64,6 +64,12 @@
       "url": "http://homeassistant.local:8123/mcp_server/sse",
       "headers": { "Authorization": "Bearer PASTE-A-LONG-LIVED-HA-TOKEN" },
       "enabled": false
+    },
+    "keenable": {
+      "url": "https://api.keenable.ai/mcp-public",
+      "headers": { "X-Keenable-Title": "OpenAmika" },
+      "enabled": false,
+      "persona_note": "网上搜索（Keenable），能直接搜网页、读一个网页的内容，适合查点小事：新闻、营业时间、某个说法对不对"
     }
   }
 }

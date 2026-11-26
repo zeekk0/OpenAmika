@@ -353,6 +353,10 @@ agreed) · **confirm** (parks as *pending*; you approve on the Use page, it runs
 - **Home Assistant** — its MCP Server integration URL + a long-lived token. Counts as IoT too.
 - **OpenClaw** — `openclaw mcp serve` exposes channel conversations (read/send messages), not its
   toolset; add it as a plain server if that is what you want.
+- **Keenable** — a hosted web search server, no key or account: `https://api.keenable.ai/mcp-public`
+  (the `keenable` entry in the example, off). `search_web_pages` is **auto** by its name;
+  `fetch_page_content` (one page as text) defaults to **confirm**. Limited per IP address (10 calls a
+  second, 1,000 an hour); an `X-API-Key` header with a key from keenable.ai lifts that.
 
 Details and the bridge's environment variables: `servers/openamika-agents/README.md`.
 
