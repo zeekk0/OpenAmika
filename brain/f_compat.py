@@ -18,7 +18,13 @@ What these servers do not have in common, and how each is handled here:
 - Thinking. A server may put it in a separate field (ignored: only ``delta.content`` is read), inline as a leading
   ``<think>…</think>``, or inline with the opening tag already in the prompt, so that only ``</think>`` arrives.
   ThinkFilter removes both inline forms before a word can reach her voice.
-- Model names. llama.cpp answers with a file path, so a differing name is recorded and is not an error.
+- Model names. llama.cpp answers with a file path, so a differing name is recorded and is not an error. It may list
+  the model as that path too, which on Windows has backslashes, and other servers list names in any script. The
+  usage ledger takes short ASCII identifiers only, so such a model is booked under ``ledger_name``; the server is
+  still asked for the name it listed.
+- Addresses. A name can stand for several, and the system tries them in its own order: on Windows "localhost" is
+  ::1 before 127.0.0.1, and a server started on 127.0.0.1 answers only after the refusal at ::1, two seconds later
+  on every call. ``_send`` asks at the address that answered last, then IPv4 before IPv6.
 - Usage. Some servers report none: the call still counts as complete, with zero tokens.
 - Cost. A server of your own charges nothing: the ledger books these calls at zero, as it does Ollama's. An https
   server that reports its charge in the usage object (reported_charge) is booked at it, cost source "provider";
@@ -29,6 +35,7 @@ What these servers do not have in common, and how each is handled here:
 """
 import contextlib
 import copy
+import hashlib
 import ipaddress
 import itertools
 import json
@@ -41,12 +48,13 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 from f_memory import _write
 from f_ollama import ANSWER_TOKENS
 from f_openrouter import (MAX_OUTPUT_TOKENS, OpenRouterClient, OpenRouterError, ROLES, _merge, first_line,
                           normalize_usage)
+from f_usage import _label
 
 COMPAT = "openai_compat"
 CONFIG_NAME = "openai_compat.json"
@@ -69,6 +77,8 @@ _CLOSE_RE = re.compile(r"</(?:think|thinking|reasoning)>", re.I)
 # this and is held back until its closing tag. The other roles are not spoken, so all of their text can wait.
 _SPOKEN_STARTS = {"surface": ("status",), "deep": ("[", "我说", "我接着说", "我心想")}
 _QUIRKS = {}                                   # chat URL -> what its server refused (learned from a 400)
+_ANSWERED = {}                                 # (name, port) of a plain-http server -> its address that answered last
+_NO_PROXY = {"http": None, "https": None, "all": None}      # requests: this one request asks no proxy
 # The key is in brain/.env and the address it is bound to is in the config file, so the two cannot change in one
 # step. Three things keep a key from being paired with the address another key was entered for:
 # - save_key numbers each new key (_KEY_STAMP) and a config remembers the number it was read under, so a config
@@ -123,11 +133,68 @@ def local_address(base_url):
         found = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
     except OSError as error:
         raise ValueError(f"{host} does not resolve: {error}") from None
-    addresses = [info[4][0] for info in found]
+    # An address of one network link (fe80::…) is whole only with its zone, which the system gives apart from it.
+    addresses = [info[4][0] + (f"%{info[4][3]}" if len(info[4]) > 3 and info[4][3] and "%" not in info[4][0] else "")
+                 for info in found]
     for address in addresses:
         if ipaddress.ip_address(address.split("%")[0]).is_global:
             raise ValueError(f"{host} is a public address ({address}); {USE_HTTPS}")
     return addresses
+
+
+def _goes_direct(http, url):
+    """True when a request for `url` goes straight to its server: neither the environment nor the system's settings
+    put a proxy in its way. requests itself is asked; a stand-in for it (a test's) knows no proxies."""
+    proxies_for = getattr(getattr(http, "utils", None), "get_environ_proxies", None)
+    if proxies_for is None:
+        return True
+    try:
+        return not proxies_for(url)
+    except Exception:
+        return False            # not known: the request goes out as written, as it always did
+
+
+def _never_connected(error):
+    """True when a request failed before there was a connection (refused, or no answer to the attempt): nothing was
+    sent, so the server did nothing. requests keeps urllib3's reason inside its own error's first argument."""
+    reason = getattr(error.args[0] if error.args else None, "reason", None)
+    kinds = {cls.__name__ for found in (error, reason) for cls in type(found).__mro__}
+    return bool(kinds & {"ConnectTimeout", "ConnectTimeoutError", "NewConnectionError"})
+
+
+def _send(http, method, url, addresses, **kwargs):
+    """One request to a model server. `addresses` is what local_address() found for its name.
+
+    A name that stands for several addresses is asked at them one by one: the one that answered last first, then
+    IPv4 before IPv6 (as contrib/ollama-bridge does). Left to the system, "localhost" on Windows is ::1 first, and a
+    server started on 127.0.0.1 is reached only after the refusal at ::1, two seconds later on every call. Only a
+    failure to connect moves on to the next address: nothing was sent, so no call is made twice. The server sees
+    the Host it was addressed by. No proxy is asked for the way to an address when none is for the name.
+
+    The request goes out as written when there is nothing to choose: an https address, a name with one address, or
+    a proxy in the way of this name (it looks the name up itself).
+    """
+    send = getattr(http, method)
+    parts = urlsplit(url)
+    known = list(dict.fromkeys(addresses))
+    usable = [address for address in known if "%" not in address]     # one with a zone (fe80::1%12) fits no URL
+    if len(known) < 2 or not usable or not _goes_direct(http, url):
+        return send(url, **kwargs)
+    name = (parts.hostname, parts.port)
+    usable.sort(key=lambda address: (address != _ANSWERED.get(name), ":" in address))
+    pinned = dict(kwargs, headers=dict(kwargs.get("headers") or {}, Host=parts.netloc), proxies=dict(_NO_PROXY))
+    for address in usable:
+        host = f"[{address}]" if ":" in address else address
+        at = urlunsplit(parts._replace(netloc=host if parts.port is None else f"{host}:{parts.port}"))
+        try:
+            response = send(at, **pinned)
+        except Exception as error:
+            if _never_connected(error) and (address != usable[-1] or len(usable) < len(known)):
+                continue
+            raise
+        _ANSWERED[name] = address
+        return response
+    return send(url, **kwargs)      # only an address that fits no URL is left: the system reaches it by the name
 
 
 def _entry_options(row):
@@ -159,7 +226,11 @@ def _entry_options(row):
 
 def _model_row(row):
     name = row.get("name") if isinstance(row, dict) else None
-    if not isinstance(name, str) or not name.strip() or len(name) > 200 or _NOT_CHAT_RE.search(name):
+    if not isinstance(name, str) or not name.strip() or len(name) > 200:
+        return None
+    # Only the last part of a name says what the model is: not the folders of a path (C:\Users\Watts\…), and not
+    # the publisher before a slash (mattshumer/…).
+    if _NOT_CHAT_RE.search(re.split(r"[\\/]", name.strip().rstrip("\\/"))[-1]):
         return None
     try:
         return {"name": name.strip(), **_entry_options(row)}
@@ -239,6 +310,28 @@ def merged_models(current, detected):
     return sorted(kept + [m for m in detected if m["name"] not in names], key=lambda m: m["name"])
 
 
+def ledger_name(name):
+    """The name the usage ledger books a model under. The ledger takes short ASCII identifiers and nothing that
+    looks like a credential (f_usage._label), and it refuses a call under any other name before the call is made.
+    A server lists what it likes: llama.cpp on Windows a path with backslashes, another a name in Chinese. A name
+    the ledger takes is booked as it is. In any other, a backslash becomes a slash and every other character the
+    ledger refuses becomes "_"; a name that lost more than its backslashes, or its start (the end of a long one is
+    kept: it is the file's name), ends in a few characters of its hash, so that two such models stay two. A name
+    that still reads like a credential is booked by that hash alone."""
+    name = str(name or "")
+    try:
+        return _label(name)
+    except ValueError:
+        pass
+    slashed = name.replace("\\", "/")
+    plain = re.sub(r"[^\w.:/@+\- ]", "_", slashed, flags=re.ASCII)[-140:]
+    mark = "@" + hashlib.sha256(name.encode("utf-8", "replace")).hexdigest()[:8]
+    try:
+        return _label(plain if plain == slashed else plain + mark)
+    except ValueError:          # what is left still reads like a credential ("sk-" in "task-7b"): the hash alone
+        return "model" + mark
+
+
 def _error_detail(response, key=""):
     """The server's own explanation, closed and bounded, with the key removed should a server echo it."""
     detail = ""
@@ -264,11 +357,11 @@ def discover(http, base_url, key="", *, timeout=(3, 15)):
     the caller's to judge (saved_key): it is sent to this address as given."""
     base = compat_base_url(base_url)
     try:
-        local_address(base)
+        addresses = local_address(base)
     except ValueError as error:
         raise OpenRouterError(str(error)) from None
     headers = {"Authorization": "Bearer " + key} if key else {}
-    response = http.get(base + "/models", headers=headers, timeout=timeout, allow_redirects=False)
+    response = _send(http, "get", base + "/models", addresses, headers=headers, timeout=timeout, allow_redirects=False)
     status = getattr(response, "status_code", 200)
     if status in (401, 403):
         _error_detail(response, key)
@@ -462,7 +555,8 @@ class CompatClient(OpenRouterClient):
         think = receipt.pop("_think", None)   # a filter is not JSON; the receipt is archived
         if done and not cancelled and think is not None and think.state == "thinking":
             receipt["reasoning_unfinished"] = True
-            print(f"[compat] {receipt['requested_model']} used its whole answer budget thinking; she said nothing")
+            with contextlib.suppress(Exception):    # a console that cannot write the model's name: the call still settles
+                print(f"[compat] {receipt['requested_model']} used its whole answer budget thinking; she said nothing")
         super()._settle(handle, receipt, started, done, cancelled, error, embedding=embedding, drained=drained)
 
     def _adapt(self, body, url):
@@ -481,7 +575,7 @@ class CompatClient(OpenRouterClient):
 
     def _post(self, url, body, stream):
         try:
-            local_address(self.base_url)      # every call: the name may have come to stand for a public address
+            addresses = local_address(self.base_url)    # every call: the name may now stand for a public address
         except ValueError as error:
             raise self._told(OpenRouterError(str(error)), str(error)) from None
         headers = {"Content-Type": "application/json"}
@@ -490,8 +584,8 @@ class CompatClient(OpenRouterClient):
         for _ in range(3):
             self._adapt(body, url)
             try:
-                response = self.http.post(url, headers=headers, json=body, stream=stream, timeout=self.timeout,
-                                          allow_redirects=False)
+                response = _send(self.http, "post", url, addresses, headers=headers, json=body, stream=stream,
+                                 timeout=self.timeout, allow_redirects=False)
             except Exception as error:
                 kinds = {cls.__name__ for cls in type(error).__mro__}
                 if "ReadTimeout" in kinds:

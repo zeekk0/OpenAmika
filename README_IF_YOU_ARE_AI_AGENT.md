@@ -595,6 +595,10 @@ prompt: unlike Ollama, this transport cannot set the context window, so the serv
   name is looked up each time), and refuses otherwise with `… is a public address; plain http is for local servers
   only: use https for a server outside your own network`. An `https` address may be anywhere. Redirects are never
   followed.
+- **A name with several addresses** (`http://localhost:…`) is asked at the address that answered last, then IPv4
+  before IPv6, and only a failure to connect moves on to the next one (`_send`). On Windows `localhost` is `::1`
+  first: left to that order, a server started on `127.0.0.1` answered every call two seconds late. The server sees
+  the `Host` it was addressed by. A request that a proxy stands in the way of goes out as written.
 - **The key is optional and bound to its address.** A key typed with the address is tried first and saved only if
   the server accepts it: in `brain/.env` as `OPENAI_COMPAT_API_KEY`, with the address it was entered for in
   `key_base_url` (`config/openai_compat.json`). A key with a space or one of `$ # " ' \` or a backtick is refused
@@ -617,6 +621,14 @@ prompt: unlike Ollama, this transport cannot set the context window, so the serv
   server's calls are booked at zero, marked `unreported`, and its bill is on its own account. Either way the budget
   cannot stop a call to it beforehand: no price is known here before the call. Tokens are zero when the server
   reports no usage. Receipts go to `memory_f/compat_receipts/`.
+- **Model names.** Detect offers what the server lists (a name of up to 200 characters), except a model that is not
+  a chat model by its name: `embed`, `whisper`, `tts`, `dall-e`, `moderation` or `rerank` in the last part of it.
+  The folders of a path and the publisher before a slash are not looked at. The server is asked for a model by the
+  name it listed. The usage ledger takes short ASCII names only, so a model listed as a Windows path (llama.cpp),
+  or under a name in another script, is booked under another name (`ledger_name`): `C:\models\x.gguf` as
+  `C:/models/x.gguf`; any other character the ledger refuses as `_`, with eight characters of the name's hash at
+  the end; a name of more than 160 characters by its last 140 and the hash; a name that reads like a credential
+  (`sk-` in `multitask-7b`) as `model@` and the hash alone. Receipts keep the name as the server wrote it.
 - The first-run wizard on the Use page offers OpenRouter and Ollama only; this one is set on the Setup page (the
   wizard's brain step can be skipped).
 

@@ -1,6 +1,7 @@
 """An OpenAI-compatible server as a role transport (f_compat + the role manager's generated options). Offline:
 the real HTTP in here goes to stand-in servers on the loopback."""
 import contextlib
+import io
 import json
 import os
 import shutil
@@ -10,9 +11,12 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
+from urllib.parse import urlsplit
 
 import requests
+import urllib3
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "brain"))
@@ -21,15 +25,16 @@ from _llm_stub import LlmStub, unused_url                           # noqa: E402
 import f_compat                                                     # noqa: E402
 import f_memory                                                     # noqa: E402
 from f_compat import (COMPAT, KEY_ENV, CompatClient, ThinkFilter, compat_base_url, compat_role_config, reported_charge,   # noqa: E402
-                      discover, load_compat_config, local_address, save_compat_config, save_key, saved_key,
+                      discover, ledger_name, load_compat_config, local_address, save_compat_config, save_key, saved_key,
                       strip_thinking)
 from f_memory import MemoryRuntime                                   # noqa: E402
 from f_openrouter import describe_error                              # noqa: E402
 from f_roles import NATIVE_KEYS, ROLES, install_roles                # noqa: E402
-from f_usage import UsageMeter                                       # noqa: E402
+from f_usage import UsageMeter, _label                               # noqa: E402
 
 BASE = "http://127.0.0.1:1234/v1"
 SERVER = {"base_url": BASE, "models": [{"name": "local-model"}]}
+WINDOWS_PATH = r"C:\models\gemma-3-27b-it-Q4_K_M.gguf"                # how llama.cpp on Windows lists its model
 
 
 class Response:
@@ -57,9 +62,9 @@ class HTTP:
         return self.responses.pop(0)
 
 
-def sse(*chunks, usage=None, finish="stop"):
-    rows = [{"model": "/models/x.gguf", "choices": [{"delta": {"content": c}, "finish_reason": None}]} for c in chunks]
-    rows.append({"model": "/models/x.gguf", "choices": [{"delta": {}, "finish_reason": finish}]})
+def sse(*chunks, usage=None, finish="stop", model="/models/x.gguf"):
+    rows = [{"model": model, "choices": [{"delta": {"content": c}, "finish_reason": None}]} for c in chunks]
+    rows.append({"model": model, "choices": [{"delta": {}, "finish_reason": finish}]})
     if usage:
         rows.append({"choices": [], "usage": usage})
     return ["data: " + json.dumps(r) for r in rows] + ["data: [DONE]"]
@@ -72,9 +77,16 @@ def run(role, *chunks):
 
 
 def resolves_to(*addresses):
-    """socket.getaddrinfo as if the name stood for these addresses."""
-    return patch.object(f_compat.socket, "getaddrinfo", lambda host, port, **kw: [
-        (socket.AF_INET, socket.SOCK_STREAM, 6, "", (address, port)) for address in addresses])
+    """socket.getaddrinfo as if the name stood for these addresses, in the shape the system gives them: an IPv6
+    address comes with its zone apart from it ("fe80::1%12" here is ("fe80::1", port, 0, 12) there)."""
+    def found(host, port, **kw):
+        rows = []
+        for address in addresses:
+            bare, _, zone = address.partition("%")
+            rows.append((socket.AF_INET6, socket.SOCK_STREAM, 6, "", (bare, port, 0, int(zone or 0))) if ":" in bare else
+                        (socket.AF_INET, socket.SOCK_STREAM, 6, "", (bare, port)))
+        return rows
+    return patch.object(f_compat.socket, "getaddrinfo", found)
 
 
 class AddressTests(unittest.TestCase):
@@ -95,6 +107,8 @@ class AddressTests(unittest.TestCase):
             self.assertTrue(local_address(url))
         with resolves_to("192.168.1.20"):
             self.assertEqual(local_address("http://box:8000/v1"), ["192.168.1.20"])
+        with resolves_to("fe80::1%12", "::1", "192.168.1.20"):      # an address of one network link keeps its zone
+            self.assertEqual(local_address("http://box:8000/v1"), ["fe80::1%12", "::1", "192.168.1.20"])
 
     def test_plain_http_is_for_local_servers_and_anything_else_needs_https(self):
         for url in ("http://8.8.8.8:8000/v1", "http://[2001:4860:4860::8888]/v1"):
@@ -170,6 +184,15 @@ class ClientTests(unittest.TestCase):
         self.assertEqual((receipt["status"], receipt["cost_usd"], receipt["actual_model"]), ("complete", 0.0, "/models/x.gguf"))
         self.assertEqual(receipt["usage"]["tokens"]["total_input_tokens"], 80)
         json.dumps(receipt)                                  # the archive must be able to write it
+
+    def test_a_console_that_cannot_write_the_model_name_does_not_stop_the_call_from_settling(self):
+        server = {"base_url": BASE, "models": [{"name": "通义千问-7b-chat"}]}
+        cfg = compat_role_config(server, "通义千问-7b-chat", "deep")
+        self.http.responses = [Response(lines=sse("<think>still planning", finish="length"))]
+        with contextlib.redirect_stdout(io.TextIOWrapper(io.BytesIO(), encoding="ascii")):      # a console without Chinese
+            self.assertEqual("".join(self.client.stream(cfg, [{"role": "user", "content": "u"}])), "")
+        receipt = self.receipts[0][1]
+        self.assertEqual((receipt["requested_model"], receipt["reasoning_unfinished"]), ("通义千问-7b-chat", True))
 
     def test_a_server_without_usage_still_completes(self):
         cfg = compat_role_config(SERVER, "local-model", "surface")
@@ -316,6 +339,15 @@ class DiscoverTests(unittest.TestCase):
         self.assertEqual(discover(http, BASE), [{"name": "a-model"}, {"name": "z-model"}])
         self.assertEqual(http.calls[0][2]["headers"], {})
 
+    def test_only_the_last_part_of_a_name_says_that_it_is_not_a_chat_model(self):
+        chat = [r"C:\Users\Watts\models\gemma-3-27b-it-Q4_K_M.gguf", r"D:\llm\embedded-box\qwen3-32b.gguf",
+                "/home/betts/models/x.gguf", "mattshumer/reflection-70b"]
+        other = [r"C:\models\bge-m3-embedding.gguf", "BAAI/bge-reranker-v2-m3", "openai/gpt-4o-mini-tts", "whisper-1",
+                 "models/embedding-001"]
+        http = HTTP()
+        http.responses = [Response(data={"data": [{"id": name} for name in chat + other]})]
+        self.assertEqual([m["name"] for m in discover(http, BASE)], sorted(chat))
+
     def test_a_server_that_wants_a_key_is_told_apart_from_one_that_is_down(self):
         http = HTTP()
         http.responses = [Response(status=401, data={})]
@@ -354,6 +386,153 @@ class DiscoverTests(unittest.TestCase):
             self.assertEqual(load_compat_config(root)["models"], [{"name": "local-model"}])
             save_compat_config(root, dict(SERVER, base_url="http://8.8.8.8/v1"))
             self.assertEqual(load_compat_config(root)["base_url"], BASE)      # a hand-written public address over plain http
+
+
+class LedgerNameTests(unittest.TestCase):
+    """The usage ledger refuses a call under a name that is not a short ASCII identifier. A server lists what it likes."""
+    ODD = (WINDOWS_PATH, "通义千问-7b-chat", "Meta-Llama-3.1 (8B) [Q4_K_M]", "multitask-7b",
+           "D:\\AI\\" + "a-long-folder-name\\" * 9 + "model.gguf", "x" * 200)
+
+    def test_a_name_the_ledger_takes_is_booked_as_it_is(self):
+        for name in ("local-model", "/models/x.gguf", "google/gemma-3-27b-it", "hf.co/user/repo:Q4_K_M", "qwen3@q4 v2+"):
+            self.assertEqual(ledger_name(name), name)
+
+    def test_any_other_name_becomes_one_the_ledger_takes(self):
+        for name in self.ODD:
+            with self.assertRaises(ValueError):
+                _label(name)                                    # what refused every call to such a model
+            self.assertEqual(_label(ledger_name(name)), ledger_name(name))
+        self.assertEqual(len({ledger_name(name) for name in self.ODD}), len(self.ODD))
+
+    def test_a_windows_path_still_reads_as_the_path(self):
+        self.assertEqual(ledger_name(WINDOWS_PATH), "C:/models/gemma-3-27b-it-Q4_K_M.gguf")
+        self.assertRegex(ledger_name(self.ODD[4]), r"/a-long-folder-name/model\.gguf@[0-9a-f]{8}$")    # a long one keeps its end
+
+    def test_names_that_differ_only_in_what_the_ledger_refuses_stay_two(self):
+        self.assertNotEqual(ledger_name("模型一.gguf"), ledger_name("模型二.gguf"))
+        self.assertRegex(ledger_name("模型一.gguf"), r"^___\.gguf@[0-9a-f]{8}$")
+
+    def test_a_name_that_reads_like_a_credential_is_booked_by_its_hash_alone(self):
+        self.assertRegex(ledger_name("multitask-7b"), r"^model@[0-9a-f]{8}$")
+        self.assertRegex(ledger_name(r"C:\keys\sk-live.gguf"), r"^model@[0-9a-f]{8}$")
+
+
+class Wires:
+    """requests stood in for, with a model server that takes connections only at the addresses in `up`. Anywhere else
+    the call fails the way requests fails it; `cut` is an address that takes the connection and then drops it."""
+    def __init__(self, *up, cut=(), proxies=None):
+        self.up, self.cut, self.calls = set(up), set(cut), []
+        if proxies is not None:
+            self.utils = SimpleNamespace(get_environ_proxies=lambda url, no_proxy=None: proxies)
+
+    def _send(self, url, **kwargs):
+        self.calls.append((url, kwargs))
+        host = urlsplit(url).hostname
+        if host in self.cut:
+            raise requests.exceptions.ConnectionError(urllib3.exceptions.ProtocolError("Connection aborted."))
+        if host not in self.up:
+            raise type(SeveralAddressesTests.refused)(*SeveralAddressesTests.refused.args)
+        if "json" not in kwargs:
+            return Response(data={"data": [{"id": "local-model"}]})
+        return Response(lines=sse("status: ok"))
+    post = get = _send
+
+    def urls(self):
+        return [url for url, _ in self.calls]
+
+
+class SeveralAddressesTests(unittest.TestCase):
+    """A name can stand for several addresses, in the system's order: on Windows "localhost" is ::1, then 127.0.0.1.
+    Left to that order, a server started on 127.0.0.1 answered every call two seconds late."""
+    NAMED = "http://localhost:1234/v1"
+
+    @classmethod
+    def setUpClass(cls):
+        try:                                                    # a refusal as requests itself reports one
+            requests.get(unused_url(), timeout=(5, 5), proxies=dict(f_compat._NO_PROXY))
+        except requests.exceptions.ConnectionError as error:
+            cls.refused = error
+
+    def setUp(self):
+        f_compat._ANSWERED.clear()
+        f_compat._QUIRKS.clear()
+        self.cfg = compat_role_config(SERVER, "local-model", "surface")
+
+    def turn(self, http, base_url=NAMED, api_key=""):
+        client = CompatClient(http, lambda request: "h1", lambda handle, receipt: None, base_url=base_url, api_key=api_key)
+        return "".join(client.stream(self.cfg, [{"role": "user", "content": "u"}]))
+
+    def test_the_name_is_asked_at_ipv4_first_and_the_server_sees_the_name(self):
+        http = Wires("127.0.0.1")
+        with resolves_to("::1", "127.0.0.1"):
+            self.assertEqual(self.turn(http, api_key="k"), "status: ok")
+            self.assertEqual(discover(http, self.NAMED), [{"name": "local-model"}])
+        self.assertEqual(http.urls(), ["http://127.0.0.1:1234/v1/chat/completions", "http://127.0.0.1:1234/v1/models"])
+        sent = http.calls[0][1]
+        self.assertEqual((sent["headers"]["Host"], sent["headers"]["Authorization"]), ("localhost:1234", "Bearer k"))
+        self.assertEqual(sent["proxies"], {"http": None, "https": None, "all": None})     # none is asked for the way there
+        self.assertFalse(sent["allow_redirects"])
+
+    def test_the_address_that_answered_last_is_asked_first(self):
+        http = Wires("::1")                                     # a server on IPv6 only
+        with resolves_to("::1", "127.0.0.1"):
+            self.assertEqual(self.turn(http), "status: ok")
+            self.assertEqual(self.turn(http), "status: ok")
+        self.assertEqual(http.urls(), ["http://127.0.0.1:1234/v1/chat/completions",        # refused: the first call pays once
+                                       "http://[::1]:1234/v1/chat/completions", "http://[::1]:1234/v1/chat/completions"])
+
+    def test_only_a_failure_to_connect_moves_on_to_the_next_address(self):
+        http = Wires("::1", cut=["127.0.0.1"])                  # it took the request: the call may have run
+        with resolves_to("::1", "127.0.0.1"):
+            with self.assertRaises(requests.exceptions.ConnectionError):
+                self.turn(http)
+        self.assertEqual(http.urls(), ["http://127.0.0.1:1234/v1/chat/completions"])
+
+    def test_a_server_that_is_down_is_reported_once_every_address_was_tried(self):
+        http = Wires()
+        with resolves_to("::1", "127.0.0.1"):
+            with self.assertRaises(requests.exceptions.ConnectionError) as caught:
+                self.turn(http)
+        self.assertEqual(len(http.calls), 2)
+        self.assertEqual(describe_error(caught.exception), f"Your model server: nothing answers at {self.NAMED} — is it running?")
+        self.assertRegex(type(caught.exception).__name__ + ": ", f_memory.TRANSIENT_ERROR)    # memory jobs try again later
+
+    def test_with_nothing_to_choose_the_request_goes_out_as_written(self):
+        for base, addresses, http in (("http://box:8000/v1", ["192.168.1.20"], Wires("box")),                # one address
+                                      (self.NAMED, ["::1", "127.0.0.1"], Wires("localhost", proxies={"http": "http://proxy:3128"})),
+                                      ("https://api.example.com/v1", [], Wires("api.example.com"))):
+            with self.subTest(base=base), resolves_to(*addresses):
+                self.assertEqual(self.turn(http, base), "status: ok")
+                self.assertEqual(http.urls(), [base + "/chat/completions"])
+                self.assertNotIn("Host", http.calls[0][1]["headers"])
+                self.assertNotIn("proxies", http.calls[0][1])
+
+    def test_an_address_that_fits_no_url_is_left_to_the_system(self):
+        http = Wires("box")                                     # it listens on the link-local address only
+        with resolves_to("fe80::1%12", "192.168.1.20"):
+            self.assertEqual(self.turn(http, "http://box:8000/v1"), "status: ok")
+        self.assertEqual(http.urls(), ["http://192.168.1.20:8000/v1/chat/completions", "http://box:8000/v1/chat/completions"])
+
+    def test_over_real_http_a_server_addressed_by_name_answers_and_sees_that_name(self):
+        stub = LlmStub(["local-model"], "status: ok")           # on 127.0.0.1 only, as LM Studio and llama.cpp start
+        self.addCleanup(stub.close)
+        named = f"http://localhost:{stub.server.server_address[1]}/v1"
+        self.assertEqual(discover(requests, named), [{"name": "local-model"}])
+        self.assertEqual(self.turn(requests, named), "status: ok")
+        self.assertEqual({seen["host"] for seen in stub.requests}, {urlsplit(named).netloc})
+
+    def test_over_real_http_a_server_on_ipv6_only_is_reached_after_the_refusal_at_ipv4(self):
+        try:
+            stub = LlmStub(["local-model"], "status: ok", host="::1")
+        except OSError:
+            self.skipTest("this machine has no IPv6 loopback")
+        self.addCleanup(stub.close)
+        named = f"http://localhost:{stub.server.server_address[1]}/v1"
+        if "::1" not in local_address(named):
+            self.skipTest("localhost does not stand for ::1 on this machine")
+        self.assertEqual(self.turn(requests, named), "status: ok")     # a real refusal at 127.0.0.1 came first, where it stands for both
+        self.assertEqual(self.turn(requests, named), "status: ok")
+        self.assertEqual({seen["host"] for seen in stub.requests}, {urlsplit(named).netloc})
 
 
 class RouteTests(unittest.TestCase):
@@ -568,6 +747,25 @@ class RoleManagerTests(unittest.TestCase):
         self.assertEqual(http.calls[-1][0], BASE + "/chat/completions")
         self.assertEqual(self.meter.summary()["active_requests"], 0)
         self.assertTrue(list((self.root / "memory_f/compat_receipts").glob("*.json")))
+
+    def test_a_model_listed_under_a_name_the_ledger_refuses_answers_and_is_booked(self):
+        http = self.g["http_requests"]
+        for name in (WINDOWS_PATH, "通义千问-7b-chat", "multitask-7b"):
+            with self.subTest(name=name):
+                save_compat_config(self.root, {"base_url": BASE, "models": [{"name": name}], "detected_at": "t"})
+                self.manager.reload_compat()
+                self.manager.set({role: f"{role}:compat:{name}" for role in ROLES})
+                http.responses = [Response(lines=sse("status: ok", usage={"prompt_tokens": 12, "completion_tokens": 3}, model=name))]
+                parts = {"user_content": "u", "_f_phase": "surface"}
+                text = "".join(self.g["_pick_stream"](parts, self.g["AVAILABLE_MODELS"][f"surface:compat:{name}"]))
+                self.assertEqual(text, "status: ok")
+                self.assertEqual(http.calls[-1][1]["model"], name)          # the server is asked for the name it listed
+                with self.meter.read_connection() as conn:
+                    row = conn.execute("SELECT model, actual_model, status, issues_json FROM requests ORDER BY rowid DESC").fetchone()
+                self.assertEqual(tuple(row), (ledger_name(name), ledger_name(name), "complete", "[]"))
+                receipts = [json.loads(path.read_text(encoding="utf-8")) for path in (self.root / "memory_f/compat_receipts").glob("*.json")]
+                self.assertIn((name, name), [(r["requested_model"], r["actual_model"]) for r in receipts])   # as the server wrote it
+        self.assertEqual(self.meter.summary()["active_requests"], 0)
 
     def test_selection_and_a_vanished_model(self):
         result = self.manager.set({role: f"{role}:compat:local-model" for role in ROLES})

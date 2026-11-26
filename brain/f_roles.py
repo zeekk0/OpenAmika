@@ -34,7 +34,8 @@ from f_memory import _write
 from f_openrouter import (ALIBABA, AlibabaClient, OpenRouterClient, alibaba_base_url, alibaba_role_config,
                           embedding_config, load_alibaba_catalog, load_catalog, role_config)
 from f_ollama import OLLAMA, THINKING_ROLES, OllamaClient, load_ollama_config, ollama_role_config
-from f_compat import COMPAT, CompatClient, compat_role_config, is_local, load_compat_config, saved_key
+from f_compat import (COMPAT, CompatClient, compat_role_config, is_local, ledger_name, load_compat_config,
+                      saved_key)
 
 ROLES = ("surface", "deep", "reflection", "memory_write")
 NATIVE_KEYS = {"surface": "grok-4.3-fast", "deep": "claude-5-sonnet",
@@ -50,6 +51,12 @@ NATIVE_PROVIDERS = {"claude-sonnet-5": "anthropic"}
 # webui's legacy per-layer model routes (Flask endpoint names) and its model list.
 MODEL_ROUTES = ("api_surface_model", "api_deep_model", "api_thinking_model")
 MODEL_LIST_ROUTE = "get_models"
+
+
+def _ledger_model(config):
+    """The name the usage ledger books this role's model under: the model's own, except on an OpenAI-compatible
+    server, which may list a name the ledger refuses (f_compat.ledger_name)."""
+    return ledger_name(config["model_id"]) if config.get("transport") == COMPAT else config["model_id"]
 
 
 class ModelSelectionBusy(RuntimeError):
@@ -268,7 +275,7 @@ class RoleManager:
     def _add_price(self, config):
         if config.get("transport") in (OLLAMA, COMPAT):
             # Local, or a server whose price is unknown here. A priced (zero) entry keeps the meter's budget gate satisfied.
-            self.meter.pricing["models"][config["transport"] + ":" + config["model_id"]] = {
+            self.meter.pricing["models"][config["transport"] + ":" + _ledger_model(config)] = {
                 "input": 0.0, "output": 0.0, "cache_read": 0.0}
             return
         if config.get("transport") == ALIBABA:
@@ -492,7 +499,7 @@ def install_roles(g, root, memory, meter, scope, local, pricing):
         if observer:
             observer(request)
         config = request["config"]
-        return meter.begin(config.get("transport") or "openrouter", config["model_id"],
+        return meter.begin(config.get("transport") or "openrouter", _ledger_model(config),
                            metadata.get("phase", config["role"]),
                            turn_id=metadata.get("turn_id", ""), estimated_max_usd=request["estimated_max_usd"])
 
@@ -504,8 +511,11 @@ def install_roles(g, root, memory, meter, scope, local, pricing):
         reported = (receipt.get("usage") or {}).get("cost_source") == "provider"
         extra = ({"reported_cost_usd": receipt.get("cost_usd")} if transport == ALIBABA or (transport == COMPAT and reported)
                  else {"reported_cost_usd": 0.0} if transport == OLLAMA else {})
+        actual = receipt.get("actual_model")
+        if transport == COMPAT and actual:
+            actual = ledger_name(actual)        # llama.cpp answers with a file path; the receipt keeps it as sent
         meter.finish(handle, usage=receipt["raw_usage"] or None, status=receipt["status"],
-                     actual_model=receipt.get("actual_model"), actual_provider=receipt.get("actual_provider"),
+                     actual_model=actual, actual_provider=receipt.get("actual_provider"),
                      provider_request_id=receipt.get("request_id"), error=receipt.get("error_type"), **extra)
         _write(receipts_dirs.get(transport, receipts_dirs["openrouter"]) / (handle + ".json"), receipt)
         observer = g.get("F_OR_AFTER_CALL")

@@ -7,9 +7,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
 class LlmStub:
-    def __init__(self, models=(), reply="ok", refuse=0, usage=None):
+    def __init__(self, models=(), reply="ok", refuse=0, usage=None, host="127.0.0.1"):
         """refuse: an HTTP status to answer every request with (401 for a server that wants a key). usage: the usage
-        object of every answer (default: 5 prompt tokens and 1 completion token, no charge)."""
+        object of every answer (default: 5 prompt tokens and 1 completion token, no charge). host: the one address
+        it listens on ("::1" for a server on IPv6 only; OSError where the machine has none)."""
         self.requests = []
         stub, stub_models, stub_reply = self, list(models), reply
         stub_usage = usage or {"prompt_tokens": 5, "completion_tokens": 1}
@@ -19,7 +20,8 @@ class LlmStub:
                 pass
 
             def _record(self, body):
-                stub.requests.append({"path": self.path, "auth": self.headers.get("Authorization"), "body": body})
+                stub.requests.append({"path": self.path, "auth": self.headers.get("Authorization"), "body": body,
+                                      "host": self.headers.get("Host")})
 
             def _json(self, payload):
                 if refuse:
@@ -52,8 +54,9 @@ class LlmStub:
                     self.wfile.write(("data: " + json.dumps(row) + "\n\n").encode("utf-8"))
                 self.wfile.write(b"data: [DONE]\n\n")
 
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        self.host = f"http://127.0.0.1:{self.server.server_address[1]}"
+        family = socket.AF_INET6 if ":" in host else socket.AF_INET
+        self.server = type("Server", (ThreadingHTTPServer,), {"address_family": family})((host, 0), Handler)
+        self.host = f"http://{f'[{host}]' if ':' in host else host}:{self.server.server_address[1]}"
         self.url = self.host + "/v1"
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
